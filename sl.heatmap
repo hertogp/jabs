@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8  -*-
+
+'''
+          _\|/_
+          (o o)
+  +----oOO-{_}-OOo-----------Syslog-----------------------------+
+  |                                                             |
+  |          __                  __                             |
+  |         / /_   ___   ____ _ / /_ ____ ___   ____ _ ____     |
+  |        / __ \ / _ \ / __ `// __// __ `__ \ / __ `// __ \    |
+  |       / / / //  __// /_/ // /_ / / / / / // /_/ // /_/ /    |
+  |      /_/ /_/ \___/ \__,_/ \__//_/ /_/ /_/ \__,_// .___/     |
+  |                                                /_/          |
+  |                                                             |
+  |              syslog.csv --[+]--> heatmap.xlsx               |
+  |                            ^                                |
+  |                            |                                |
+  |                       iface_map.csv                         |
+  |                                                             |
+  +-------------------------------------------------------------+
+
+  - syslog.csv
+    - required
+    - fields: _time host code msg
+    - e.g. via splunk query
+
+        index=network sourcetype=syslog
+         <hostname(s)/filter>
+         | rex field=_raw ".*%(?<code>.*?):\s*(?<msg>.*)"
+         | table _time host code msg
+
+  - iface-map.csv
+    - optional
+    - fields: switch iface host description
+    - iface name turns into <a><x/y/z>, e.g. g1/0/1 or e0
+
+  - heatmap.xlsx
+    - change default name with -o option
+    - tabs: heatmap syslog ifaces
+'''
+
+# Dependencies:
+# - pandas
+# - xlrd
+# - numexpr
+
+import sys
+import re
+import argparse
+import pandas as pd
+
+args = None
+
+def parseargs(argv):
+    'parse commandline arguments, return arguments Namespace'
+    p = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__)
+    padd = p.add_argument
+    padd('--verbose', '-v', action='count', help='verbose flag', default=0)
+    padd('--iface-map', '-i', required=False, type=str, default='ifaces.csv',
+         help='csv-file mapping ifaces to hosts')
+    padd('--nokeep', '-n', required=False, action='store_true',
+         help='donot keep ifaces without a mapping to a host')
+    padd('--output', '-o', required=False, type=str, default='heatmap.xlsx',
+         help='output filename, defaults to heatmap.xlsx')
+    padd('syslog', help='csv-file containing syslog messages')
+
+    return p.parse_args(argv)
+
+def read_syslog(args):
+    'read and prep the syslog messages'
+    try:
+        df = pd.read_csv(args.syslog)
+    except (IOError, OSError) as e:
+        print('Oops', repr(e))
+        sys.exit(1)
+
+    # ensure we have the correct(ly named) columns
+    df.columns = df.columns.str.lower().str.replace('_', '')
+    if set(df.columns.tolist()) != set(['time', 'host', 'code', 'msg']):
+        raise Exception('Syslog file has wrong fields?')
+
+    # ensure some stuff
+    df = df.dropna()                      # drop rows wit 1+ NaN
+    df.time = pd.to_datetime(df.time)     # set time column to time obj's
+    df.set_index('time', inplace=True)    # set time column as index
+    df.sort_index(inplace=True)           # make lookups faster
+
+    return df
+
+def read_ifaces(args):
+    'get switch.iface to host name mapping, if any'
+    # ifaces.csv = switch iface host description
+    try:
+        df = pd.read_csv(args.iface_map)
+    except (IOError, OSError) as e:
+        msg(0, 'Skipping iface mappings:', repr(e))
+        return pd.DataFrame() # empty dataframe
+
+    # ensure required fields are present
+    for required in ['switch', 'iface', 'host']:
+        if required not in df.columns:
+            msg(0, 'ifaces seems to like proper fields, like', required)
+            return pd.DataFrame()
+
+    # set lookup idx as switch.iface, ensure iface is 1 letter + x/y/z
+    rgx = re.compile('(?<=^.)[^0-9]+')
+    # df['idx'] = df.switch.str.lower() + '.' + df.iface.replace(to_replace=rgx,
+    #                                                             value='',
+    #                                                             regex=True)
+    df = df.assign(idx=df.switch.str.lower() + '.' + df.iface.replace(
+                                                                to_replace=rgx,
+                                                                value='',
+                                                                regex=True))
+
+    df.host = df.host.str.strip()
+    df.set_index('idx', inplace=True)
+    df.sort_index(inplace=True)
+
+    return df
+
+def limit_codes(sl, codes=None):
+    'limit syslogs to list of codes'
+    if 'code' not in sl.columns:
+        msg(0, 'hmm, sl is missing code column for limiting syslogs')
+        return sl
+    if codes:
+        sl = sl[sl.code.isin(codes)]
+    return sl
+
+def limit_times(sl, start=None, period='D', chunks=31):
+    # TODO: limit syslog by timebuckets, for now done in get_heatmap
+    pass
+
+def add_ifaces_column(df):
+    'extract iface from syslog msg'
+    if not 'msg' in df.columns:
+        msg(0, 'hmmm, df is missing msg column for iface extraction')
+        return df
+
+    # add 'iface'-column by extraction of msg column
+    rgx = re.compile('(?i)(?:interface)(?P<ifname>[^,]+?),')
+    df = df.assign(iface=df.msg.str.extract(rgx, expand=True))
+
+    # prepend host name to iface column, with short iface-name
+    rgx = re.compile('(?<=^..)[^0-9]+')
+    df.iface = df.iface.replace(to_replace=rgx, value='', regex=True)
+    df.iface = df.iface.str.lower().str.strip()
+    df.iface = df.host.str.lower() + '.' + df.iface
+
+    return df
+
+def set_host_by_iface(syslog, ifaces, drop=True):
+    'replace host in syslog with host in ifaces'
+    if ifaces.empty:
+        return syslog
+
+    def lookup(iface):
+        try:
+            row = ifaces.loc[iface]
+        except KeyError:
+            if drop:
+                return None
+            return iface
+
+        return row.host
+
+    syslog['host'] = syslog['iface'].apply(lookup)
+    if drop:
+        return syslog.dropna()
+    return syslog
+
+def get_heatmap(df, start=None, end=None, period='D'):
+    'return a heatmap dataframe'
+    # ,-> host code msg iface   | ,-> timebuckets
+    # V                         | v   <cnt, zero-fill>
+    # DatetimeIndex             |host
+    if period not in ['D', 'h', 'M']:
+        period = 'D'
+
+    mx = df.groupby([df.index.to_period('D'),'host'])[['host']].size()
+    # MultiIndex (date, host) -> size
+    mx = mx.unstack(0, fill_value=0)   #v(host) / >(date) -> size
+    return mx
+
+def write_heatmap(args, syslog, ifaces, heatmap):
+    from xlsxwriter.utility import xl_rowcol_to_cell, xl_range_abs
+
+    # Get excell writer
+    writer = pd.ExcelWriter(args.output)
+
+    # Heatmap
+    name, mx = 'heatmap', heatmap
+    mx.to_excel(writer, name)
+    fmt = writer.book.add_format()  # add format
+    fmt.set_align('vcenter')
+    fmt.set_align('center')
+    sh = writer.sheets['heatmap']
+    # - format nicely
+    cells = xl_range_abs(1, 1, len(mx), len(mx.columns))
+    sh.conditional_format(cells, {'type': '2_color_scale',
+                                  'min_color': '#99ff99',
+                                  'max_color': '#ff3300'})
+    sh.freeze_panes(1, 1)
+    sh.set_column('A:A', 30)
+
+    # syslog
+    name, mx = 'syslog', syslog
+    fmt.set_align('left')
+    mx.to_excel(writer, name)
+    sh = writer.sheets[name]
+    sh.freeze_panes(1,1)
+    sh.set_column('A:A', 30)
+
+    # Ifaces
+    name, mx = 'ifaces', ifaces
+    mx.to_excel(writer, name)
+    sh = writer.sheets[name]
+    sh.freeze_panes(1, 1)
+    sh.set_column('A:A', 30)
+
+    # Lastly, let the writer save it all
+    writer.save()
+
+    return 1
+
+def msg(level, *a):
+    'possibly print something'
+    if args and level > args.verbose:
+        return
+    print(' '.join(str(i) for i in a), file=sys.stderr)
+
+def main(args):
+    'main func'
+    try:
+        syslog = read_syslog(args)  # index = DatetimeIndex (time)
+        ifaces = read_ifaces(args)  # index = switch.iface (idx)
+
+        # - heatmap via UPDOWN messages
+        updown = limit_codes(syslog, ['LINK-3-UPDOWN', 'LINEPROTO-5-UPDOWN'])
+        updown = add_ifaces_column(updown)
+        updown = set_host_by_iface(updown, ifaces, args.nokeep)
+
+        # updown = add_ifaces(syslog, ['LINK-3-UPDOWN', 'LINEPROTO-5-UPDOWN'])
+
+        msg(0, 'syslog - {} messages'.format(len(syslog.index)))
+        msg(0, 'ifaces - {} mappings found'.format(len(ifaces.index)))
+        msg(0, 'updown - {} messages seen'.format(len(updown.index)))
+
+        heatmap = get_heatmap(updown)
+
+        # Experimental - set heatmap column headers to short string
+        heatmap.columns = heatmap.columns.strftime('%d-%m')
+        suc6 = write_heatmap(args, syslog, ifaces, heatmap)
+        if suc6:
+            msg(0, 'success - see {} for results'.format(args.output))
+
+    except (OSError, IOError) as e:
+        msg(0, 'Error', repr(e))
+        return 1
+
+    return 0
+
+
+if __name__ == '__main__':
+    args = parseargs(sys.argv[1:])
+    sys.exit(main(args))

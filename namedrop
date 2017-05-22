@@ -2,17 +2,10 @@
 # -*- coding: utf-8  -*-
 
 '''
-namedrop - drop some names for ip adresses in some csv file (adding columns)
-
-    Log files with only ip addresses are boring to look at.
-
-    Uses:
-    - nd_names.csv by default
-
+namedrop - drop some names/info found by ip adresses in some csv file;
 '''
 
 import sys
-
 import pandas as pd
 import numpy as np
 import pytricia as pt
@@ -56,93 +49,104 @@ import pytricia as pt
 # via[ name ] -> ipaddr
 
 #-- IPT table, 1 tbl ip -> name, vpn
-ipt = pt.PyTricia()
-ipt['0.0.0.0/0'] = ('noname', 'novpn')
+def refactorme():
+    ipt = pt.PyTricia()
+    ipt['0.0.0.0/0'] = ('noname', 'novpn')
 
-f = pd.read_csv('./scr/sims/routes.csv', sep=',').drop_duplicates('subnet', keep='first')
-for idx, row in f.iterrows():
-    try:
-        ipt[row.subnet] = ('noname', row.vpn)
-    except Exception as e:
-        pass
+    f = pd.read_csv('./scr/sims/routes.csv', sep=',').drop_duplicates('subnet', keep='first')
+    for idx, row in f.iterrows():
+        try:
+            ipt[row.subnet] = ('noname', row.vpn)
+        except Exception as e:
+            pass
 
-f = pd.read_csv('./scr/sims/users.csv', sep=',').drop_duplicates('user', keep='first')
-for idx, row in f.iterrows():
-    try:
-        ipt[row.ip] = (row.user, ipt[row.ip][-1])
-    except Exception as e:
-        pass
+    f = pd.read_csv('./scr/sims/users.csv', sep=',').drop_duplicates('user', keep='first')
+    for idx, row in f.iterrows():
+        try:
+            ipt[row.ip] = (row.user, ipt[row.ip][-1])
+        except Exception as e:
+            pass
 
-print('ipt table has {} entries'.format(len(ipt)))
+    print('ipt table has {} entries'.format(len(ipt)))
 
-#-- Build GSM table gsm[8digits] -> hostname, ggsn, apn
-#  Build table: [316].... -> name, ip, apn, nas, vpn
-gsm = {}
-empty = {'ggsn':'?', 'host':'?', 'nas':'?',
-         'apn':'?', 'ip':'0.0.0.0', 'vpn': 'n/a'}
-f = pd.read_csv('./scr/sims/ggsn.csv', sep=',')
-f = f.drop_duplicates('gsm', keep='first')
-for idx, row in f.iterrows():
-    nr = str(row.gsm)[3:]
-    h = gsm.setdefault(nr, empty.copy())
-    h.update({'ggsn': row.ggsn, 'host': row.user, 'nas': row.nas})
+    #-- Build GSM table gsm[8digits] -> hostname, ggsn, apn
+    #  Build table: [316].... -> name, ip, apn, nas, vpn
+    gsm = {}
+    empty = {'ggsn':'?', 'host':'?', 'nas':'?',
+             'apn':'?', 'ip':'0.0.0.0', 'vpn': 'n/a'}
+    f = pd.read_csv('./scr/sims/ggsn.csv', sep=',')
+    f = f.drop_duplicates('gsm', keep='first')
+    for idx, row in f.iterrows():
+        nr = str(row.gsm)[3:]
+        h = gsm.setdefault(nr, empty.copy())
+        h.update({'ggsn': row.ggsn, 'host': row.user, 'nas': row.nas})
 
-f = pd.read_csv('./scr/sims/gsm.csv', sep=',')
-f = f.drop_duplicates('gsm', keep='first')
-for idx, row in f.iterrows():
-    nr = str(row.gsm)[3:]
-    h = gsm.setdefault(nr, empty.copy())
-    if row.apn != 'missing':
-        h['apn']= row.apn
-    if row.nas != 'missing':
-        h['nas'] = row.nas
+    f = pd.read_csv('./scr/sims/gsm.csv', sep=',')
+    f = f.drop_duplicates('gsm', keep='first')
+    for idx, row in f.iterrows():
+        nr = str(row.gsm)[3:]
+        h = gsm.setdefault(nr, empty.copy())
+        if row.apn != 'missing':
+            h['apn']= row.apn
+        if row.nas != 'missing':
+            h['nas'] = row.nas
 
-# use name to lookup ip in users.csv
-name2ip = {}
-f = pd.read_csv('./scr/sims/users.csv', sep=',')
-f = f.drop_duplicates('user', keep='first')
-for idx, row in f.iterrows():
-    if row.user == 'missing': continue
-    if row.ip == 'missing': continue
-    name2ip[row.user] = row.ip
-for k,h in gsm.items():
-    ip = name2ip.get(h['host'], None)
-    if ip is None: continue
-    h['ip'] = ip
-    try:
-        vpn = ipt[ip][-1]
-        h['vpn'] = vpn
-    except Exception as e:
-        pass
+    # use name to lookup ip in users.csv
+    name2ip = {}
+    f = pd.read_csv('./scr/sims/users.csv', sep=',')
+    f = f.drop_duplicates('user', keep='first')
+    for idx, row in f.iterrows():
+        if row.user == 'missing': continue
+        if row.ip == 'missing': continue
+        name2ip[row.user] = row.ip
+    for k,h in gsm.items():
+        ip = name2ip.get(h['host'], None)
+        if ip is None: continue
+        h['ip'] = ip
+        try:
+            vpn = ipt[ip][-1]
+            h['vpn'] = vpn
+        except Exception as e:
+            pass
 
-# Some stats
-for k,v in gsm.items(): print(k,v)
-print('we have {} entries in ipt'.format(len(ipt)))
+    # Some stats
+    for k,v in gsm.items(): print(k,v)
+    print('we have {} entries in ipt'.format(len(ipt)))
 
-keys = empty.keys()
-with open('./scr/delme.csv', 'w') as f:
-    f.write('gsm,' + ','.join(keys))
-    f.write("\n")
-    for k,v in gsm.items():
-        if v['ip'] == '0.0.0.0': continue
-        f.write(k+",")
-        f.write(','.join(str(v[k]) for k in keys))
+    keys = empty.keys()
+    with open('./scr/delme.csv', 'w') as f:
+        f.write('gsm,' + ','.join(keys))
         f.write("\n")
+        for k,v in gsm.items():
+            if v['ip'] == '0.0.0.0': continue
+            f.write(k+",")
+            f.write(','.join(str(v[k]) for k in keys))
+            f.write("\n")
 
-#--- 
-migr = pd.read_csv('./scr/sims/migratie.csv', sep=',')
-# migr['vpn'] = migr['gsm'].apply(lambda x: gsm.get(x, empty).get('vpn'))
+    #--- 
+    migr = pd.read_csv('./scr/sims/migratie.csv', sep=',')
+    # migr['vpn'] = migr['gsm'].apply(lambda x: gsm.get(x, empty).get('vpn'))
 
-for idx,row in migr.iterrows():
-    h = gsm.get(row.gsm, empty)
-    try:
-        i = ipt[row.calling_ip]
-    except Exception as e:
-        i = ('n/a', 'n/a')
-    print(row.gsm, row.calling_ip, h['ip'], row.calling_host, h['vpn'], i, h['apn'], h['ggsn'])
+    for idx,row in migr.iterrows():
+        h = gsm.get(row.gsm, empty)
+        try:
+            i = ipt[row.calling_ip]
+        except Exception as e:
+            i = ('n/a', 'n/a')
+        print(row.gsm, row.calling_ip, h['ip'], row.calling_host, h['vpn'], i, h['apn'], h['ggsn'])
 
-print(migr.head())
+    print(migr.head())
 
-print(ipt['10.117.148.72'])
-print(ipt['172.22.90.70'])
+    print(ipt['10.117.148.72'])
+    print(ipt['172.22.90.70'])
+
+
+def main(argv):
+    print('Main returning success!')
+
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))
 
