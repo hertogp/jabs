@@ -193,11 +193,11 @@ def write_heatmap(fname, syslog, ifaces, heatmap):
     # - you cant read cell values with xslxwriter (its a writer)
     # - cell format > row format > column format
     writer = pd.ExcelWriter(fname)
-    fmt_heatcells = writer.book.addformat({'align': 'center',
-                                           'valign': 'vcenter',
-                                           'bold': False,
-                                           'font_name': 'mono',
-                                           'font_size': 8})
+    fmt_heatcells = writer.book.add_format({'align': 'center',
+                                            'valign': 'vcenter',
+                                            'bold': False,
+                                            'font_name': 'mono',
+                                            'font_size': 8})
     # heatmap sheet
     name, mx = 'heatmap', heatmap
     mx.to_excel(writer, name)
