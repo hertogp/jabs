@@ -62,6 +62,7 @@ def parseargs(argv):
 
     return arg
 
+
 def read_syslog(fname):
     'turn syslog into dataframe with proper columns and a DatetimeIndex'
     try:
@@ -70,7 +71,7 @@ def read_syslog(fname):
         msg(0, 'Fatal: unreadable input file {}'.format(repr(args.syslog)))
         sys.exit(1)
 
-    df.columns = df.columns.str.lower().str.replace('_', '') # _time
+    df.columns = df.columns.str.lower().str.replace('_', '')  # _time
     required = set('time host code msg'.split())
     intersect = set(df.columns.tolist()).intersection(required)
     if intersect != required:
@@ -84,13 +85,14 @@ def read_syslog(fname):
 
     return df
 
+
 def read_ifaces(fname):
     'turn iface map into dataframe with switch.iface as its index'
     try:
         df = pd.read_csv(fname)
     except (IOError, OSError):
         msg(0, 'iface map not provided or unreadable: skip this!')
-        return pd.DataFrame() # empty dataframe
+        return pd.DataFrame()  # empty dataframe
 
     df.columns = df.columns.str.lower()
     required = set('switch iface host'.split())
@@ -114,6 +116,7 @@ def read_ifaces(fname):
 
     return df
 
+
 def limit_codes(syslog, codes=None):
     'limit syslogs to list of codes'
     if 'code' not in syslog.columns:
@@ -123,14 +126,18 @@ def limit_codes(syslog, codes=None):
         syslog = syslog[syslog.code.isin(codes)]
     return syslog
 
-def limit_times(syslog, start=None, period='D', chunks=31):
-    'filter syslog by time and return a view on orginal dataframe'
+
+def limit_times(df, start, end):
+    'select rows at or after start and before end'
     # TODO: limit syslog by timebuckets, for now done in get_heatmap
-    pass
+    start = pd.to_datetime(start)
+    end = pd.to_datetime(end)
+    return df[(df.index >= start) & (df.index < end)]
+
 
 def add_ifaces_column(df):
     'add iface=host.iface column to dataframe, extract iface from msg column'
-    if not 'msg' in df.columns:
+    if 'msg' not in df.columns:
         msg(0, 'hmmm, df is missing msg column for iface extraction')
         return df
 
@@ -144,6 +151,7 @@ def add_ifaces_column(df):
     df.iface = df.host.str.lower() + '.' + df.iface
 
     return df
+
 
 def set_host_by_iface(syslog, ifaces, drop=True):
     'replace host in syslog with host in ifaces'
@@ -165,6 +173,7 @@ def set_host_by_iface(syslog, ifaces, drop=True):
         return syslog.dropna()
     return syslog
 
+
 def get_heatmap(df, start=None, end=None, period='D'):
     'turn df with DatetimeIndex into heatmap df with hostxtime->count'
     if period not in ['D', 'h', 'M']:
@@ -175,6 +184,7 @@ def get_heatmap(df, start=None, end=None, period='D'):
     mx = mx.unstack(0, fill_value=0)
 
     return mx
+
 
 def write_heatmap(fname, syslog, ifaces, heatmap):
     'write xlsx with sheets for heatmap, syslog and iface map'
@@ -220,11 +230,13 @@ def write_heatmap(fname, syslog, ifaces, heatmap):
 
     return 1
 
+
 def msg(level, *a):
     'possibly print something'
     if args and level > args.verbose:
         return
     print(' '.join(str(i) for i in a), file=sys.stderr)
+
 
 def main():
     'main func'
