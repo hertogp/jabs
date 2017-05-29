@@ -44,12 +44,16 @@ def parseargs(argv):
         description=__doc__)
     padd = p.add_argument
     padd('--verbose', '-v', action='count', help='verbose flag', default=0)
-    padd('--iface-map', '-i', required=False, type=str, default='ifaces.csv',
+    padd('--iface-map', '-i', required=False, type=str, default='',
          help='csv-file, fields: switch,iface,host[,..]')
     padd('--nokeep', '-n', required=False, action='store_true',
          help='donot keep ifaces without a mapping to a host')
     padd('--output', '-o', required=False, type=str, default='',
          help='output filename, default <infile>.xlsx')
+    padd('--zoom', '-z', required=False, type=str, default='',
+         help="start,stop,frequency csv-list to zoom in on")
+    padd('--codes', '-c', required=False, type=str, default='',
+         help="csv-list of codes to select for heatmap counting")
     padd('syslog', help='syslog csv-file, fields:_time,host,code,msg')
 
     arg = p.parse_args(argv)
@@ -57,9 +61,23 @@ def parseargs(argv):
         msg(0, 'Fatal: only digest csv-files, not ' + repr(arg.syslog))
         sys.exit(1)
 
+    if arg.codes:
+        arg.codes = [x.strip() for x in arg.codes.split(',')]
+    else:
+        arg.codes = ['LINK-3-UPDOWN', 'LINEPROTO-5-UPDOWN']
+
+    if arg.zoom:
+        arg.zoom = arg.zoom.split(',')
+        if len(arg.zoom) != 3:
+            raise Exception('zoom needs start,stop,freq as csv-list!')
+        arg.zoom[:2] = pd.to_datetime(arg.zoom[0]), pd.to_datetime(arg.zoom[1])
+    else:
+        arg.zoom = [pd.NaT, pd.NaT, 'D']
+
     if not arg.output:
         arg.output = os.path.splitext(arg.syslog)[0] + '.xlsx'
 
+    print(arg)
     return arg
 
 
@@ -82,6 +100,7 @@ def read_syslog(fname):
     df.time = pd.to_datetime(df.time)
     df.set_index('time', inplace=True)
     df.sort_index(inplace=True)
+    msg(0, 'read_syslog', len(df.index), df.index.min(), df.index.max())
 
     return df
 
@@ -129,9 +148,12 @@ def limit_codes(syslog, codes=None):
 
 def limit_times(df, start, end):
     'select rows at or after start and before end'
-    # TODO: limit syslog by timebuckets, for now done in get_heatmap
-    start = pd.to_datetime(start)
-    end = pd.to_datetime(end)
+    if pd.isnull(start) and pd.isnull(end):
+        msg(0, 'no start,end, returning df')
+        return df
+    start = df.index.min() if pd.isnull(start) else start
+    end = df.index.max() if pd.isnull(end) else end
+
     return df[(df.index >= start) & (df.index < end)]
 
 
@@ -141,14 +163,19 @@ def add_ifaces_column(df):
         msg(0, 'hmmm, df is missing msg column for iface extraction')
         return df
 
+    # new iface col = long interface name extracted from msg column
+    # TODO: currently rgx is for LINK-3-UPDOWN/LINEPROTO msg's
+    #       other commands with interface <iface> without comma wont match!
     rgx = re.compile('(?i)(?:interface)(?P<ifname>[^,]+?),')
     df = df.assign(iface=df.msg.str.extract(rgx, expand=True))
 
-    # shorten iface-name and prepend host name
+    # then shorten iface-name and prepend host name
     rgx = re.compile('(?<=^..)[^0-9]+')
-    df.iface = df.iface.replace(to_replace=rgx, value='', regex=True)
-    df.iface = df.iface.str.lower().str.strip()
-    df.iface = df.host.str.lower() + '.' + df.iface
+    df['iface'] = df.iface.replace(to_replace=rgx, value='', regex=True)
+    df.iface = df.iface.fillna('?')
+    print(df.iface)
+    df['iface'] = df.iface.str.lower().str.strip()
+    df['iface'] = df.host.str.lower() + '.' + df.iface
 
     return df
 
@@ -160,6 +187,7 @@ def set_host_by_iface(syslog, ifaces, drop=True):
 
     def lookup(iface):
         'lookup host by iface, return host, iface or None'
+        print('lookup', iface)
         try:
             row = ifaces.loc[iface]
         except KeyError:
@@ -174,16 +202,19 @@ def set_host_by_iface(syslog, ifaces, drop=True):
     return syslog
 
 
-def get_heatmap(df, start=None, end=None, period='D'):
+def get_heatmap(df, start, end, freq):
     'turn df with DatetimeIndex into heatmap df with hostxtime->count'
-    if period not in ['D', 'h', 'M']:
-        period = 'D'
-
-    mx = df.groupby([df.index.to_period(period), 'host'])[['host']].size()
-    # mx day,host->count Series => hostxday->count dataframe
-    mx = mx.unstack(0, fill_value=0)
-
-    return mx
+    # df has datetime index and at least an iface column
+    start = df.index.min() if pd.isnull(start) else start
+    end = df.index.max() if pd.isnull(end) else end
+    print('get_heat')
+    print(' - start', start)
+    print(' - end', end)
+    mx = df[(df.index >= start) & (df.index < end)]
+    mx = mx.groupby([mx.index.name, 'host']).size()
+    mx = mx.unstack(level=-1, fill_value=0)
+    mx = mx.resample(freq).sum()
+    return mx.T.fillna(0)
 
 
 def write_heatmap(fname, syslog, ifaces, heatmap):
@@ -244,21 +275,37 @@ def main():
         syslog = read_syslog(args.syslog)     # index = DatetimeIndex (time)
         ifaces = read_ifaces(args.iface_map)  # index = switch.iface (idx)
 
-        # - heatmap via UPDOWN messages
-        updown = limit_codes(syslog, ['LINK-3-UPDOWN', 'LINEPROTO-5-UPDOWN'])
-        updown = add_ifaces_column(updown)
-        updown = set_host_by_iface(updown, ifaces, args.nokeep)
+        slines = limit_codes(syslog, args.codes)
+        if not(len(slines)):
+            msg(0, 'fatal, code filter leaves no entries:', args.codes)
+            sys.exit(1)
 
-        # updown = add_ifaces(syslog, ['LINK-3-UPDOWN', 'LINEPROTO-5-UPDOWN'])
+        slines = limit_times(slines, *args.zoom[0:2])
+        if not(len(slines)):
+            msg(0, 'fatal: time filter leaves no entries:', args.zoom[0:2])
+            sys.exit(1)
 
+        slines = add_ifaces_column(slines)
+        slines = set_host_by_iface(slines, ifaces, args.nokeep)
         msg(0, 'syslog - {} messages'.format(len(syslog.index)),
             '\nifaces - {} mappings found'.format(len(ifaces.index)),
-            '\nupdown - {} messages seen'.format(len(updown.index)))
-
-        heatmap = get_heatmap(updown)
+            '\nslines - {} messages seen'.format(len(slines.index)))
+        heatmap = get_heatmap(slines, *args.zoom)
 
         # Experimental - set heatmap column headers to short string
-        heatmap.columns = heatmap.columns.strftime('%d-%m')
+        # heatmap.columns = heatmap.columns.strftime('%d-%m')
+        freq = args.zoom[2]
+        print('freq', freq)
+        if 'T' in freq:
+            tfmt = '%d-%m %H:%M'
+        elif 'H' in freq:
+            tfmt = '%d-%m %H'
+        elif 'M' in freq:
+            tfmt = '%Y-%m'
+        else:
+            tfmt = '%d-%m'
+        heatmap.columns = heatmap.columns.strftime(tfmt)
+
         suc6 = write_heatmap(args.output, syslog, ifaces, heatmap)
         if suc6:
             msg(0, 'success - see {} for results'.format(args.output))
