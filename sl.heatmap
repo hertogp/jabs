@@ -145,8 +145,9 @@ def read_ifaces(fname):
                                                 value='',
                                                 regex=True))
     df.host = df.host.str.strip()
-    # ensure no dups in index so df.loc[label] always returns a NaN or Series
-    # and never a dataframe (ie for dups). Required by get_heatmap's lookup
+    # no dups in index -> df.loc[sw.iface] always returns a NaN or a
+    # single row as a Series and never a dataframe (ie for dups).
+    # - Required by get_heatmap's lookup
     df.drop_duplicates(subset='idx', keep='first', inplace=True)
     df.set_index('idx', inplace=True)
     df.sort_index(inplace=True)
@@ -175,30 +176,30 @@ def limit_times(df, start, end):
     return df[(df.index >= start) & (df.index < end)]
 
 
-def add_ifaces_column(df):
-    'add iface=host.iface column to dataframe, extract iface from msg column'
+def add_pkey_column(df, pkey='iface'):
+    'add a named primary key column, (from host & iface from msg column)'
     if 'msg' not in df.columns:
         msg(0, 'hmmm, df is missing msg column for iface extraction')
         return df
 
-    # new iface col = long interface name extracted from msg column
+    # new pkey col = long interface name extracted from msg column
     # TODO: currently rgx is for LINK-3-UPDOWN/LINEPROTO msg's
     #       other commands with interface <iface> without comma wont match!
-    rgx = re.compile('(?i)(?:interface)(?P<ifname>[^,]+?),')
-    df = df.assign(iface=df.msg.str.extract(rgx, expand=True))
+    rgx = re.compile('(?i)(?:interface)(?P<ifpkey>[^,]+?),')
+    df = df.assign(**{pkey: df.msg.str.extract(rgx, expand=True)})
 
     # then shorten iface-name and prepend host name
     rgx = re.compile('(?<=^..)[^0-9]+')
-    df.iface = df.iface.replace(to_replace=rgx, value='', regex=True)
-    df.iface = df.iface.fillna('?')
-    df.iface = df.iface.str.lower().str.strip()
-    df.iface = df.host.str.lower() + '.' + df.iface
+    df[pkey] = df[pkey].replace(to_replace=rgx, value='', regex=True)
+    df[pkey] = df[pkey].fillna('?')
+    df[pkey] = df[pkey].str.lower().str.strip()
+    df[pkey] = df.host.str.lower() + '.' + df[pkey]
 
     return df
 
 
-def set_host_by_iface(df, column, iface_map, drop=True):
-    'replace or add a column in syslog with host in ifaces'
+def col_by_pkey_lookup(df, newcol, pkey, iface_map, drop=True):
+    'replace or add a column in df by lookup up primary key in iface_map'
     if iface_map.empty:
         return df
 
@@ -220,7 +221,7 @@ def set_host_by_iface(df, column, iface_map, drop=True):
 
         return str(row.host).replace(' ', '_')
 
-    df[column] = df['iface'].apply(lookup)
+    df[newcol] = df[pkey].apply(lookup)
 
     if drop:
         return df.dropna()
@@ -323,8 +324,9 @@ def main():
             msg(0, 'fatal: time filter leaves no entries:', args.zoom[0:2])
             sys.exit(1)
 
-        slines = add_ifaces_column(slines)
-        slines = set_host_by_iface(slines, 'host', ifaces, args.nokeep)
+        slines = add_pkey_column(slines, 'pkey')
+        slines = col_by_pkey_lookup(slines, 'host', 'pkey',
+                                    ifaces, args.nokeep)
         heatmap = get_heatmap(slines, 'host', *args.zoom)
 
         msg(0, '\n---',
@@ -338,20 +340,24 @@ def main():
             '\nheatmap - device-rows, time-cols =', heatmap.shape,
             '\n---')
 
-        # Experimental - set heatmap column headers to short string
-        # heatmap.columns = heatmap.columns.strftime('%d-%m')
+        # Make for nice time-headers in heatmap sheet
         freq = args.zoom[2]
-        if 'T' in freq:
-            tfmt = '%d %b' + chr(10) + '%H:%M'  # by minute
+        if 'M' in freq:
+            tfmt = '%Y' + chr(10) + '%b'         # by month
+        elif 'D' in freq:
+            tfmt = '%b' + chr(10) + '%d'         # by day
+        elif 'T' in freq:
+            tfmt = '%d %b' + chr(10) + '%H:%M'   # by minute
         elif 'H' in freq:
-            tfmt = '%d %b' + chr(10) + '%H:%M'  # by hour
-        elif 'M' in freq:
-            tfmt = '%Y' + chr(10) + '%b'  # by month
+            tfmt = '%d %b' + chr(10) + '%H:%M'   # by hour
         else:
-            tfmt = '%b' + chr(10) + '%d'  # by day
+            tfmt = '%Y%m%d' + chr(10) + '%H:%M'  # by default
         heatmap.columns = heatmap.columns.strftime(tfmt)
-        syslog = add_ifaces_column(syslog)
-        syslog = set_host_by_iface(syslog, 'iface', ifaces)
+
+        # enrich unfiltered syslog with attached system, where possible
+        syslog = add_pkey_column(syslog, 'system')
+        syslog = col_by_pkey_lookup(syslog, 'system', 'system', ifaces)
+
         suc6 = write_heatmap(args.output, syslog, ifaces, heatmap)
         if suc6:
             msg(0, 'success - see {} for results'.format(args.output))
