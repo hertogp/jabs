@@ -14,7 +14,7 @@ r'''
   |              syslog.csv --[+]--> syslog.xlsx                |
   |                            ^                                |
   |                            |                                |
-  |                   [-i iface_map.csv]                        |
+  |                       [cli options]                         |
   +-------------------------------------------------------------+
   Splunk query for a suitable syslog.csv:
     index=network sourcetype=syslog
@@ -22,10 +22,6 @@ r'''
      | rex field=_raw ".*%(?<code>.*?):\s*(?<msg>.*)"
      | table _time host code msg
 '''
-
-# ToDo:
-# - add timeseries option:
-#   - -t <start>,<stop>,period
 
 import os
 import sys
@@ -53,7 +49,9 @@ def parseargs(argv):
     padd('--zoom', '-z', required=False, type=str, default='',
          help="start,stop,frequency csv-list to zoom in on")
     padd('--codes', '-c', required=False, type=str, default='',
-         help="csv-list of codes to select for heatmap counting")
+         help="csv-list of codes to select for heatmap")
+    padd('--sparse', '-s', action='store_true', required=False, default=False,
+         help="drop columns with all zero's")
     padd('syslog', help='syslog csv-file, fields:_time,host,code,msg')
 
     arg = p.parse_args(argv)
@@ -66,10 +64,13 @@ def parseargs(argv):
     else:
         arg.codes = ['LINK-3-UPDOWN', 'LINEPROTO-5-UPDOWN']
 
+    # read_syslog sets zoom start/end if its a NaT
     if arg.zoom:
         arg.zoom = arg.zoom.split(',')
         if len(arg.zoom) != 3:
-            raise Exception('zoom needs start,stop,freq as csv-list!')
+            raise Exception('zoom needs start,end,freq as csv-list!')
+        # either of both start,end may be omitted -> ends up as NaT
+        # and syslog_read will set it to first/last+1 day found
         arg.zoom[:2] = pd.to_datetime(arg.zoom[0]), pd.to_datetime(arg.zoom[1])
     else:
         arg.zoom = [pd.NaT, pd.NaT, 'D']
@@ -100,7 +101,21 @@ def read_syslog(fname):
     df.time = pd.to_datetime(df.time)
     df.set_index('time', inplace=True)
     df.sort_index(inplace=True)
-    msg(0, 'read_syslog', len(df.index), df.index.min(), df.index.max())
+
+    # ensure valid zoom start/end (use syslog timestamps as needed)
+    if pd.isnull(args.zoom[0]):
+        args.zoom[0] = pd.to_datetime(df.index.min().floor('d'))
+    if pd.isnull(args.zoom[1]):
+        args.zoom[1] = pd.to_datetime(df.index.max().ceil('d'))
+
+    msg(0,
+        '\nread syslog file:',
+        '\n- entries    :', len(df.index),
+        '\n- first      :', df.index.min(),
+        '\n- last       :', df.index.max(),
+        '\n- zoom start :', args.zoom[0],
+        '\n- zoom end   :', args.zoom[1],
+        '\n')
 
     return df
 
@@ -130,6 +145,9 @@ def read_ifaces(fname):
                                                 value='',
                                                 regex=True))
     df.host = df.host.str.strip()
+    # ensure no dups in index so df.loc[label] always returns a NaN or Series
+    # and never a dataframe (ie for dups). Required by get_heatmap's lookup
+    df.drop_duplicates(subset='idx', keep='first', inplace=True)
     df.set_index('idx', inplace=True)
     df.sort_index(inplace=True)
 
@@ -171,50 +189,68 @@ def add_ifaces_column(df):
 
     # then shorten iface-name and prepend host name
     rgx = re.compile('(?<=^..)[^0-9]+')
-    df['iface'] = df.iface.replace(to_replace=rgx, value='', regex=True)
+    df.iface = df.iface.replace(to_replace=rgx, value='', regex=True)
     df.iface = df.iface.fillna('?')
-    print(df.iface)
-    df['iface'] = df.iface.str.lower().str.strip()
-    df['iface'] = df.host.str.lower() + '.' + df.iface
+    df.iface = df.iface.str.lower().str.strip()
+    df.iface = df.host.str.lower() + '.' + df.iface
 
     return df
 
 
-def set_host_by_iface(syslog, ifaces, drop=True):
-    'replace host in syslog with host in ifaces'
-    if ifaces.empty:
-        return syslog
+def set_host_by_iface(df, column, iface_map, drop=True):
+    'replace or add a column in syslog with host in ifaces'
+    if iface_map.empty:
+        return df
+
+    if not iface_map.index.is_unique:
+        msg(0,
+            '\nNon-fatal: dropping duplicated (!) entries',
+            'from {}'.format(args.iface_map))
+        # drop rows with duplicated index-entries
+        iface_map = iface_map.groupby(iface_map.index).first()
 
     def lookup(iface):
         'lookup host by iface, return host, iface or None'
-        print('lookup', iface)
         try:
-            row = ifaces.loc[iface]
+            row = iface_map.loc[iface]
         except KeyError:
             if drop:
                 return None
             return iface
-        return row.host
 
-    syslog['host'] = syslog['iface'].apply(lookup)
+        return str(row.host).replace(' ', '_')
+
+    df[column] = df['iface'].apply(lookup)
+
     if drop:
-        return syslog.dropna()
-    return syslog
+        return df.dropna()
+    return df
 
 
-def get_heatmap(df, start, end, freq):
-    'turn df with DatetimeIndex into heatmap df with hostxtime->count'
+def get_heatmap(df, column, start, end, freq):
+    'Downsample Datetimeindex-d dataframe on col,return mx: colxtime->count'
+    # TODO: fix all zeros when using default start/end from samples
+    # - when you zoom, all is well -> non-zero entries
+    # - when you donot zoom (start/end=syslog based) -> all zero's results?
     # df has datetime index and at least an iface column
-    start = df.index.min() if pd.isnull(start) else start
-    end = df.index.max() if pd.isnull(end) else end
-    print('get_heat')
-    print(' - start', start)
-    print(' - end', end)
+    # -- start,end now alwyas set by read_syslog
     mx = df[(df.index >= start) & (df.index < end)]
-    mx = mx.groupby([mx.index.name, 'host']).size()
+    if column not in mx.columns:
+        msg(0, 'fatal: missing column', column, 'for heatmap creation')
+    # for idx, row in mx.iterrows():
+    #     print(row.host, type(row.host))
+
+    mx = mx.groupby([mx.index.name, column]).size()
     mx = mx.unstack(level=-1, fill_value=0)
     mx = mx.resample(freq).sum()
-    return mx.T.fillna(0)
+    # actual samples might not start/end on start/end
+    ts = pd.date_range(start=start, end=end, freq=freq)
+    mx = mx.reindex(ts).fillna(0).T
+    if args.sparse:
+        mx = mx.dropna(axis=1, how='all')
+    else:
+        mx = mx.fillna(0)
+    return mx
 
 
 def write_heatmap(fname, syslog, ifaces, heatmap):
@@ -275,37 +311,47 @@ def main():
         syslog = read_syslog(args.syslog)     # index = DatetimeIndex (time)
         ifaces = read_ifaces(args.iface_map)  # index = switch.iface (idx)
 
+        # filter by syslog codes
         slines = limit_codes(syslog, args.codes)
         if not(len(slines)):
             msg(0, 'fatal, code filter leaves no entries:', args.codes)
             sys.exit(1)
 
+        # filter by syslog timestamps
         slines = limit_times(slines, *args.zoom[0:2])
         if not(len(slines)):
             msg(0, 'fatal: time filter leaves no entries:', args.zoom[0:2])
             sys.exit(1)
 
         slines = add_ifaces_column(slines)
-        slines = set_host_by_iface(slines, ifaces, args.nokeep)
-        msg(0, 'syslog - {} messages'.format(len(syslog.index)),
-            '\nifaces - {} mappings found'.format(len(ifaces.index)),
-            '\nslines - {} messages seen'.format(len(slines.index)))
-        heatmap = get_heatmap(slines, *args.zoom)
+        slines = set_host_by_iface(slines, 'host', ifaces, args.nokeep)
+        heatmap = get_heatmap(slines, 'host', *args.zoom)
+
+        msg(0, '\n---',
+            '\nsyslog  - {} messages'.format(len(syslog.index)),
+            '\nifaces  - {} mappings found'.format(len(ifaces.index)),
+            '\nslines  - {} messages seen'.format(len(slines.index)),
+            '\nzoom window',
+            '\n - start:', args.zoom[0],
+            '\n - end  :', args.zoom[1],
+            '\n - freq :', args.zoom[2],
+            '\nheatmap - device-rows, time-cols =', heatmap.shape,
+            '\n---')
 
         # Experimental - set heatmap column headers to short string
         # heatmap.columns = heatmap.columns.strftime('%d-%m')
         freq = args.zoom[2]
-        print('freq', freq)
         if 'T' in freq:
-            tfmt = '%d-%m %H:%M'
+            tfmt = '%d %b' + chr(10) + '%H:%M'  # by minute
         elif 'H' in freq:
-            tfmt = '%d-%m %H'
+            tfmt = '%d %b' + chr(10) + '%H:%M'  # by hour
         elif 'M' in freq:
-            tfmt = '%Y-%m'
+            tfmt = '%Y' + chr(10) + '%b'  # by month
         else:
-            tfmt = '%d-%m'
+            tfmt = '%b' + chr(10) + '%d'  # by day
         heatmap.columns = heatmap.columns.strftime(tfmt)
-
+        syslog = add_ifaces_column(syslog)
+        syslog = set_host_by_iface(syslog, 'iface', ifaces)
         suc6 = write_heatmap(args.output, syslog, ifaces, heatmap)
         if suc6:
             msg(0, 'success - see {} for results'.format(args.output))
