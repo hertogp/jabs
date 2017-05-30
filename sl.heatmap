@@ -78,7 +78,8 @@ def parseargs(argv):
     if not arg.output:
         arg.output = os.path.splitext(arg.syslog)[0] + '.xlsx'
 
-    print(arg)
+    print('Running with:\n', arg)
+
     return arg
 
 
@@ -194,11 +195,12 @@ def add_pkey_column(df, pkey='iface'):
     df[pkey] = df[pkey].fillna('?')
     df[pkey] = df[pkey].str.lower().str.strip()
     df[pkey] = df.host.str.lower() + '.' + df[pkey]
+    df[pkey] = df[pkey].str.replace('\.\?', '')
 
     return df
 
 
-def col_by_pkey_lookup(df, newcol, pkey, iface_map, drop=True):
+def col_by_pkey_lookup(df, newcol, pkey, iface_map, drop=False):
     'replace or add a column in df by lookup up primary key in iface_map'
     if iface_map.empty:
         return df
