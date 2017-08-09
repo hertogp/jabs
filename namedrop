@@ -2,151 +2,229 @@
 # -*- coding: utf-8  -*-
 
 '''
-namedrop - drop some names/info found by ip adresses in some csv file;
+
+namedrop - drop names/info found by ipv4 adresses in ip-lookup tables (csv)
+
+                      | -a <src_field>:table_id:lookup_field = add column
+                      | ..
+                      V
+     log file ----> namedrop -----> enriched log file
+                      ^
+                      | -t <table_id>:<ip_index_colname>:file.csv
+                      | ..
+
 '''
 
+# TODO
+# o add -r replacecols option
+# o add -d deletecols option
 import sys
+import os
+import argparse
+
 import pandas as pd
-import numpy as np
-import pytricia as pt
-
-#-- Read csv files
-
-# /*      _\|/_
-#         (o o)
-#  +---oOO-{_}-OOo-----------------------------------------------------------+
-#--| ggsn.csv                                                                |
-#  |                                                                         |
-#  |   ggsn,user,gsm,nas                                                     |
-#  |   GGSN Vodafone TLO,N370-53-550L-CE19-001-VOD,31631752134,10.10.10.81   |
-#  |   GGSN Vodafone TLO,A12-135-300R-CE19-001-VOD,31611736540,10.10.10.81   |
-#  |                                                                         |
-#--| gsm.csv                                                                 |
-#  |                                                                         |
-#  |   gsm,apn,nas                                                           |
-#  |   31631752134,nnvlo.rijkswaterstaat.nl,missing                          |
-#  |   31653944803,wks.vicnet.nl,10.10.10.190                                |
-#  |                                                                         |
-#--| routes.csv                                                              |
-#  |                                                                         |
-#  |   type,subnet,gateway,vpn                                               |
-#  |   B,172.17.39.0/24,10.249.8.1,HWN-VICNET                                |
-#  |   B,172.16.61.0/24,10.249.0.73,IVS90:IVS90                              |
-#  |                                                                         |
-#--| users.csv                                                               |
-#  |                                                                         |
-#  |   user,ip,apn,nas                                                       |
-#  |   A10-1-550L-CE19-001-KPN,172.31.39.27,missing,missing                  |
-#  |   A10-1-550L-CE19-001-VOD,172.31.35.27,missing,10.10.10.81              |
-#  +-------------------------------------------------------------------------*/
+import pytricia as pt  # see https://github.com/jsommers/pytricia
 
 
+def msg(level, *a):
+    'possibly print something'
+    if args and level > args.verbose:
+        return
+    print(' '.join(str(i) for i in a), file=sys.stderr)
 
-# - IP Lookup tables
-# vpn[ subnet ] -> (gw, vpn)
-# usr[ ipaddr ] -> (name, nas, apn, ggsn)
-# - Hash
-# via[ name ] -> ipaddr
 
-#-- IPT table, 1 tbl ip -> name, vpn
-def refactorme():
+def normalize_name(name):
+    return name.lower()
+
+
+def parseargs(argv):
+    'turn cli arguments into an arguments Namespace'
+    # Note: cannot use msg(0,...) here since args does not exist yet.
+    p = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__)
+    padd = p.add_argument
+    padd('--verbose', '-v', action='count', help='verbose flag', default=0)
+    padd('--noop', '-n', required=False, action='store_true', default=False,
+         help='No operation, stop just before processing input file')
+    padd('--table', '-t', required=False, type=str, action='append',
+         help='a lookup table <letter>[:idx-column]:<file.csv>', default=[])
+    padd('--addcols', '-a', required=False, type=str, action='append',
+         help='<letter>:<field>:inputcolumn to add field_inputcolumn',
+         default=[])
+    padd('--output', '-o', required=False, type=str, default='-',
+         help='output filename to use instead of console')
+    padd('inpfile', help='input csv file with ip columns')
+
+    arg = p.parse_args(argv)
+    if not arg.inpfile.endswith('.csv'):
+        print('Fatal: can only digest csv-files, not ' + repr(arg.inpfile),
+              file=sys.stderr)
+        sys.exit(1)
+
+    # process -a arguments into expand dictionary
+    dct = {}
+    for n, addcol in enumerate(arg.addcols):
+        # -a inputfield:tableletter:outputfield
+        flds = addcol.lower().split(':')
+        if len(flds) != 3:
+            print('Fatal, error in argument -a', addcol)
+        dct.setdefault(flds[0], []).append(flds[1:])
+    arg.expand = dct
+
+    # process -t table lookup arguments
+    for n, lookup in enumerate(arg.table):
+        flds = lookup.split(':')  # letter:[indexname:]filename
+
+        if len(flds) == 2:
+            arg.table[n] = [flds[0], None, flds[1]]
+        elif len(flds) == 3:
+            arg.table[n] = [flds[0], normalize_name(flds[1]), flds[2]]
+        else:
+            print('Fatal: wrong lookup table definition: {!r}'.format(lookup),
+                  file=sys.stderr)
+            print(' - convention is <letter>:[indexname:]file.csv',
+                  file=sys.stderr)
+            sys.exit(1)
+
+        if not lookup.endswith('.csv'):
+            print('Fatal: only csv-files please, not {!r}'.format(flds[-1]),
+                  file=sys.stderr)
+            sys.exit(1)
+
+        if not os.path.isfile(flds[-1]):
+            print('Fatal: cannot find file {!r}'.format(flds[-1]),
+                  file=sys.stderr)
+            sys.exit(1)
+
+    return arg
+
+
+def read_csv(filename, index=None):
+    'csv file to dataframe w/ normalized column names and perhaps an index'
+    msg(1, 'reading csv file {!r}'.format(filename))
+    try:
+        df = pd.read_csv(filename)
+    except (IOError, OSError):
+        msg(0, 'cannot read {}'.format(filename))
+        return pd.DataFrame()  # empty dataframe
+
+    msg(1, ' - columns names original  : {}'.format(df.columns))
+    df.columns = [normalize_name(n) for n in df.columns]
+    msg(1, ' - columns names normalized: {}'.format(df.columns))
+    n = len(df)
+    if index:
+        msg(1, ' - setting index to {!r}'.format(index))
+        df.drop_duplicates(subset=index, keep='first', inplace=True)
+        df.set_index(index, inplace=True)
+        msg(1, ' - columns names available : {}'.format(df.columns))
+        df.sort_index(inplace=True)
+        if n != len(df):
+            msg(1, ' - dropped {} dup, retaining 1st one!'.format(n - len(df)))
+        else:
+            msg(1, ' - no dups dropped!')
+    else:
+        msg(1, ' - not setting an index')
+
+    msg(1, ' - num of entries: {}'.format(len(df)))
+
+    return df
+
+
+def create_ipt(df, ip_field=None):
+    'turn a dataframe into ip lookup table -> pd.Series'
+    if ip_field is None or ip_field not in df.columns:
+        msg(0, 'Fatal: to create an ip table a ip lookup field is required')
+        sys.exit(1)
+
     ipt = pt.PyTricia()
-    ipt['0.0.0.0/0'] = ('noname', 'novpn')
-
-    f = pd.read_csv('./scr/sims/routes.csv', sep=',').drop_duplicates('subnet', keep='first')
-    for idx, row in f.iterrows():
+    for idx, row in df.iterrows():
         try:
-            ipt[row.subnet] = ('noname', row.vpn)
-        except Exception as e:
-            pass
+            ip_idx = row[ip_field]
+            if ipt.has_key(ip_idx):  # noqa W601
+                # has_key must be used to do an exact match, because
+                # the "if ip_idx in ipt:" does a longest pfx match,
+                # which is not what we want here...
+                msg(0, '>> ignoring duplicate entry for {}'.format(ip_idx))
+                msg(0, ' - already have', ipt[ip_idx])
+                msg(0, ' - ignoring data', row)
+                continue
+            ipt[ip_idx] = row  # stores reference to the Series
+        except ValueError:
+            msg(0, 'Fatal, cannot create ip lookup table from dataframe')
+            msg(0, 'its index is not an ip address?')
+            msg(0, df.index)
+            msg(0, 'current index element: {}'.format(idx))
+            sys.exit(1)
 
-    f = pd.read_csv('./scr/sims/users.csv', sep=',').drop_duplicates('user', keep='first')
-    for idx, row in f.iterrows():
-        try:
-            ipt[row.ip] = (row.user, ipt[row.ip][-1])
-        except Exception as e:
-            pass
-
-    print('ipt table has {} entries'.format(len(ipt)))
-
-    #-- Build GSM table gsm[8digits] -> hostname, ggsn, apn
-    #  Build table: [316].... -> name, ip, apn, nas, vpn
-    gsm = {}
-    empty = {'ggsn':'?', 'host':'?', 'nas':'?',
-             'apn':'?', 'ip':'0.0.0.0', 'vpn': 'n/a'}
-    f = pd.read_csv('./scr/sims/ggsn.csv', sep=',')
-    f = f.drop_duplicates('gsm', keep='first')
-    for idx, row in f.iterrows():
-        nr = str(row.gsm)[3:]
-        h = gsm.setdefault(nr, empty.copy())
-        h.update({'ggsn': row.ggsn, 'host': row.user, 'nas': row.nas})
-
-    f = pd.read_csv('./scr/sims/gsm.csv', sep=',')
-    f = f.drop_duplicates('gsm', keep='first')
-    for idx, row in f.iterrows():
-        nr = str(row.gsm)[3:]
-        h = gsm.setdefault(nr, empty.copy())
-        if row.apn != 'missing':
-            h['apn']= row.apn
-        if row.nas != 'missing':
-            h['nas'] = row.nas
-
-    # use name to lookup ip in users.csv
-    name2ip = {}
-    f = pd.read_csv('./scr/sims/users.csv', sep=',')
-    f = f.drop_duplicates('user', keep='first')
-    for idx, row in f.iterrows():
-        if row.user == 'missing': continue
-        if row.ip == 'missing': continue
-        name2ip[row.user] = row.ip
-    for k,h in gsm.items():
-        ip = name2ip.get(h['host'], None)
-        if ip is None: continue
-        h['ip'] = ip
-        try:
-            vpn = ipt[ip][-1]
-            h['vpn'] = vpn
-        except Exception as e:
-            pass
-
-    # Some stats
-    for k,v in gsm.items(): print(k,v)
-    print('we have {} entries in ipt'.format(len(ipt)))
-
-    keys = empty.keys()
-    with open('./scr/delme.csv', 'w') as f:
-        f.write('gsm,' + ','.join(keys))
-        f.write("\n")
-        for k,v in gsm.items():
-            if v['ip'] == '0.0.0.0': continue
-            f.write(k+",")
-            f.write(','.join(str(v[k]) for k in keys))
-            f.write("\n")
-
-    #--- 
-    migr = pd.read_csv('./scr/sims/migratie.csv', sep=',')
-    # migr['vpn'] = migr['gsm'].apply(lambda x: gsm.get(x, empty).get('vpn'))
-
-    for idx,row in migr.iterrows():
-        h = gsm.get(row.gsm, empty)
-        try:
-            i = ipt[row.calling_ip]
-        except Exception as e:
-            i = ('n/a', 'n/a')
-        print(row.gsm, row.calling_ip, h['ip'], row.calling_host, h['vpn'], i, h['apn'], h['ggsn'])
-
-    print(migr.head())
-
-    print(ipt['10.117.148.72'])
-    print(ipt['172.22.90.70'])
+    return ipt
 
 
-def main(argv):
-    print('Main returning success!')
+def main():
 
+    # read in the lookup tables
+    T = {}
+    for (letter, idxname, fname) in args.table:
+        df = read_csv(fname)
+        T[letter] = create_ipt(df, idxname)
+
+    # Update args.expand: replace letter with reference to lookup table
+    # < expand = {inpfield} -> [[letter, outfield], [letter, outfield], ...]
+    # > expand = {inpfield} -> [[table, outfield], [table, outfield], ...]
+    for inpfield, adds in args.expand.items():
+        for n, add in enumerate(adds):
+            try:
+                add[0] = T[add[0]]
+            except KeyError:
+                msg(0, 'Fatal, no table named {}'.format(add[0]))
+                sys.exit(1)
+
+    # read in source file to enrich
+    df = read_csv(args.inpfile)
+    if len(df) == 0:
+        msg(0, 'Fatal, no input data to enrich found in "{}"'.format(
+            args.inpfile))
+        sys.exit(1)
+
+    # print out new header line
+    newline = []
+    for name in df.columns:
+        newline.append(name)
+        adds = args.expand.get(name, None)
+        if adds is None:
+            continue
+        for t, outfield in adds:
+            newline.append('{}_{}'.format(name, outfield))
+
+    print(','.join(newline))
+
+    # bail if a no-op was specified
+    if args.noop:
+        msg(0, '')
+        msg(0, 'No operation (-n) specified, so stopping for processing data')
+        if args.verbose == 0:
+            msg(0, '- use -v flag to see more')
+        sys.exit(0)
+    # run through intput and expand columns
+    for num, row in df.iterrows():
+        newline.clear()
+        for name in row.index:
+            newline.append(str(row[name]))
+            adds = args.expand.get(name, None)
+            if adds is None:
+                continue
+            for t, outfield in adds:
+                try:
+                    key = row[name]
+                    val = t[key][outfield]
+                    newline.append(str(val))
+                except (KeyError, ValueError):
+                    newline.append('no_info')
+
+        print(','.join(newline))
     return 0
 
 
 if __name__ == '__main__':
-    sys.exit(main(sys.argv))
-
+    args = parseargs(sys.argv[1:])
+    sys.exit(main())
