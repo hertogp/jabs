@@ -157,6 +157,7 @@ def create_ipt(df, ip_field=None):
             msg(0, 'its index is not an ip address?')
             msg(0, df.index)
             msg(0, 'current index element: {}'.format(idx))
+            msg(0, 'current row is', row)
             sys.exit(1)
 
     return ipt
