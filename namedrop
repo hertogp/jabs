@@ -2,22 +2,8 @@
 # -*- coding: utf-8  -*-
 
 '''
-
 namedrop - drop names/info found by ipv4 adresses in ip-lookup tables (csv)
-
-                      | -a <src_field>:table_id:lookup_field = add column
-                      | ..
-                      V
-     log file ----> namedrop -----> enriched log file
-                      ^
-                      | -t <table_id>:<ip_index_colname>:file.csv
-                      | ..
-
 '''
-
-# TODO
-# o add -r replacecols option?
-# o add -d deletecols option?
 
 import sys
 import os
@@ -36,7 +22,7 @@ def msg(level, *a):
 
 def normalize_name(name):
     'normalize a column name to something sane'
-    return name.lower().replace(' ','_')
+    return name.lower().replace(' ', '_')
 
 
 def parseargs(argv):
@@ -54,6 +40,10 @@ def parseargs(argv):
     padd('--addcols', '-a', required=False, type=str, action='append',
          help='<letter>:<field>:inputcolumn to add field_inputcolumn',
          default=[])
+    padd('--delcols', '-d', required=False, action='append',
+         help='delete this column (repeatable)', default=[])
+    padd('--consolidate', '-c', required=False, nargs='?', const='count',
+         help='consolidate on this column')
     padd('--output', '-o', required=False, type=str, default='-',
          help='output filename to use instead of console')
     padd('inpfile', help='input csv file with ip columns')
@@ -99,6 +89,8 @@ def parseargs(argv):
                   file=sys.stderr)
             sys.exit(1)
 
+    arg.consolidate = arg.consolidate or ''
+
     return arg
 
 
@@ -111,15 +103,15 @@ def read_csv(filename, index=None):
         msg(0, 'cannot read {}'.format(filename))
         return pd.DataFrame()  # empty dataframe
 
-    msg(1, ' - columns names original  : {}'.format(df.columns))
+    msg(1, ' - columns names original  : {}'.format(df.columns.values))
     df.columns = [normalize_name(n) for n in df.columns]
-    msg(1, ' - columns names normalized: {}'.format(df.columns))
+    msg(1, ' - columns names normalized: {}'.format(df.columns.values))
     n = len(df)
     if index:
         msg(1, ' - setting index to {!r}'.format(index))
         df.drop_duplicates(subset=index, keep='first', inplace=True)
         df.set_index(index, inplace=True)
-        msg(1, ' - columns names available : {}'.format(df.columns))
+        msg(1, ' - columns names available : {}'.format(df.columns.values))
         df.sort_index(inplace=True)
         if n != len(df):
             msg(1, ' - dropped {} dup, retaining 1st one!'.format(n - len(df)))
@@ -163,6 +155,30 @@ def create_ipt(df, ip_field=None):
     return ipt
 
 
+def set_col(df, colname, ipt, key, iptcol):
+    'replace or add a column in df by longest-pfx-lookup in ip table'
+    if len(ipt) < 1:
+        return df
+
+    def lookup(key):
+        'lookup ipt row by key and return value for iptcol field'
+        try:
+            row = ipt[key]  # longest prefix match
+        except KeyError:
+            return 'n/a'
+
+        try:
+            return str(row[iptcol])
+        except KeyError:
+            msg(0, 'Fatal, ip table has no field named {}'.format(iptcol))
+            msg(0, '- row fields include', row.index.values)
+            sys.exit(1)
+
+    df[colname] = df[key].apply(lookup)
+
+    return df
+
+
 def main():
 
     # read in the lookup tables
@@ -190,16 +206,16 @@ def main():
         sys.exit(1)
 
     # print out new header line
-    newline = []
-    for name in df.columns:
-        newline.append(name)
-        adds = args.expand.get(name, None)
-        if adds is None:
-            continue
-        for t, outfield in adds:
-            newline.append('{}_{}'.format(name, outfield))
+    # newline = []
+    # for name in df.columns:
+    #     newline.append(name)
+    #     adds = args.expand.get(name, None)
+    #     if adds is None:
+    #         continue
+    #     for t, outfield in adds:
+    #         newline.append('{}_{}'.format(name, outfield))
 
-    print(','.join(newline))
+    # print(','.join(newline))
 
     # bail if a no-op was specified
     if args.noop:
@@ -208,23 +224,43 @@ def main():
         if args.verbose == 0:
             msg(0, '- use -v flag to see more')
         sys.exit(0)
-    # run through intput and expand columns
-    for num, row in df.iterrows():
-        newline.clear()
-        for name in row.index:
-            newline.append(str(row[name]))
-            adds = args.expand.get(name, None)
-            if adds is None:
-                continue
-            for t, outfield in adds:
-                try:
-                    key = row[name]
-                    val = t[key][outfield]
-                    newline.append(str(val))
-                except (KeyError, ValueError):
-                    newline.append('no_info')
 
-        print(','.join(newline))
+    # -a add columns
+    for name, adds in args.expand.items():
+        for t, getfld in adds:
+            print('add', name, t, getfld)
+            df = set_col(df, '{}_{}'.format(name, getfld), t, name, getfld)
+
+    df.sort_index(axis=1, inplace=True, ascending=False)
+
+    # -d delete columns
+    for delcol in args.delcols:
+        if delcol not in df.columns:
+            msg(0, 'cannot delete column {}, not in result set {}'.format(
+                delcol, df.columns.values))
+            continue
+        del df[delcol]
+
+    # -c consolidation (if any)
+    cons = args.consolidate
+    if len(cons) > 0 and cons in df.columns:
+        columns = [col for col in df.columns if col != cons]
+        if len(columns) == len(df.columns):
+            df[cons] = 1
+        df = df.groupby(columns).agg({cons: 'sum'})
+
+    elif len(cons) > 0:
+        msg(0, 'Cannot consolidate on column "{}", not in results {}'.format(
+            cons, df.columns.values))
+        sys.exit(1)
+    else:
+        msg(1, 'Not consolidating output')
+
+    index = len(cons) > 0
+
+    # output results
+    df.to_csv(sys.stdout, index=index, mode='w')
+
     return 0
 
 
