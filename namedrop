@@ -16,8 +16,9 @@ namedrop - drop names/info found by ipv4 adresses in ip-lookup tables (csv)
 '''
 
 # TODO
-# o add -r replacecols option
-# o add -d deletecols option
+# o add -r replacecols option?
+# o add -d deletecols option?
+
 import sys
 import os
 import argparse
@@ -34,7 +35,8 @@ def msg(level, *a):
 
 
 def normalize_name(name):
-    return name.lower()
+    'normalize a column name to something sane'
+    return name.lower().replace(' ','_')
 
 
 def parseargs(argv):
