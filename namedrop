@@ -98,7 +98,7 @@ def read_csv(filename, index=None):
     'csv file to dataframe w/ normalized column names and perhaps an index'
     msg(1, 'reading csv file {!r}'.format(filename))
     try:
-        df = pd.read_csv(filename)
+        df = pd.read_csv(filename, skipinitialspace=True)
     except (IOError, OSError):
         msg(0, 'cannot read {}'.format(filename))
         return pd.DataFrame()  # empty dataframe
@@ -134,14 +134,17 @@ def create_ipt(df, ip_field=None):
     ipt = pt.PyTricia()
     for idx, row in df.iterrows():
         try:
-            ip_idx = row[ip_field]
+            ip_idx = row[ip_field].strip()
+            ip_idx = ip_idx.replace(' ','')
+            # ensure /32 for bare addresses
+            ip_idx = ip_idx if '/' in ip_idx else '{}/{}'.format(ip_idx, 32)
             if ipt.has_key(ip_idx):  # noqa W601
                 # has_key must be used to do an exact match, because
                 # the "if ip_idx in ipt:" does a longest pfx match,
                 # which is not what we want here...
                 msg(0, '>> ignoring duplicate entry for {}'.format(ip_idx))
-                msg(0, ' - already have', ipt[ip_idx])
-                msg(0, ' - ignoring data', row)
+                msg(0, ' - already have', ','.join(str(x) for x in ipt[ip_idx]))
+                msg(0, ' - ignoring data', ','.join(str(x) for x in row))
                 continue
             ipt[ip_idx] = row  # stores reference to the Series
         except ValueError:
@@ -166,6 +169,9 @@ def set_col(df, colname, ipt, key, iptcol):
             row = ipt[key]  # longest prefix match
         except KeyError:
             return 'n/a'
+        except ValueError:
+            msg(0, 'Fatal: key "{}" not an ip address?'.format(key))
+            sys.exit(1)
 
         try:
             return str(row[iptcol])
@@ -205,18 +211,6 @@ def main():
             args.inpfile))
         sys.exit(1)
 
-    # print out new header line
-    # newline = []
-    # for name in df.columns:
-    #     newline.append(name)
-    #     adds = args.expand.get(name, None)
-    #     if adds is None:
-    #         continue
-    #     for t, outfield in adds:
-    #         newline.append('{}_{}'.format(name, outfield))
-
-    # print(','.join(newline))
-
     # bail if a no-op was specified
     if args.noop:
         msg(0, '')
@@ -228,7 +222,7 @@ def main():
     # -a add columns
     for name, adds in args.expand.items():
         for t, getfld in adds:
-            print('add', name, t, getfld)
+            print('add column', name, t, getfld, file=sys.stderr)
             df = set_col(df, '{}_{}'.format(name, getfld), t, name, getfld)
 
     df.sort_index(axis=1, inplace=True, ascending=False)
