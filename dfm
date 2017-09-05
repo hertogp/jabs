@@ -687,6 +687,30 @@ def inrange(df, lhs, rhs):
 @register_cmd
 def lte(df, lhs, rhs):
     'f1[f2,..]=lte:v1 - rows where f1(or f2,..) <= v1'
+
+    # sanity check lhs, rhs
+    errors = []
+    if len(lhs) < 1:
+        errors.append('need 1+ lhs fields')
+    if len(rhs) != 1:
+        errors.append('need exactly 1 rhs field')
+    for unknown in unknown_fields(df, lhs):
+        errors.append('field {!r} not available'.format(unknown))
+    if len(errors):
+        cmd_error(df, lhs, rhs, errors)
+
+    prn(1, 'filtering rows by {!r} <= {}'.format(lhs, rhs[0]))
+    n1 = len(df.index)
+    maxval = int(rhs[0])  # ensure this is an integer
+
+    try:
+        df = df[df[lhs].apply(lambda r: any(f <= maxval for f in r), axis=1)]
+    except (TypeError, ValueError) as e:
+        errors.append('{!r} contains non-numeric data: {}'.format(lhs, repr(e)))
+        cmd_error(df, lhs, rhs, errors)
+
+    n2 = len(df.index)
+    prn(0, '{} -> {} rows ({} filtered)'.format(n1, n2, n1-n2))
     return df
 
 @register_cmd
@@ -695,7 +719,7 @@ def gte(df, lhs, rhs):
     return df
 
 
-@add_cmd(name='sum')
+@register_cmd(name='sum')
 def sumf(df, lhs, rhs):
     'dst=sum:[f1,f2,..] - sums/counts across similar column groups or rows'
     return df
