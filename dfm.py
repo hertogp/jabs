@@ -24,12 +24,14 @@ import pytricia as pt
 #-- Glob
 __version__ = '0.1'
 
+VERBOSE = 0   # verbosity level is zero by default
 CMD_MAP = {}  # dfm func name -> func reference
 IPT_MAP = {}  # ipt fname -> ip-table
 
 #-- CMD Registry
-def parse_args():
+def parse_args(argv):
     'parse commandline arguments, return arguments Namespace'
+    global VERBOSE
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__)
@@ -44,12 +46,13 @@ def parse_args():
     padd('commands', nargs='*')
 
     # parse & sanitize the arguments
-    arg = p.parse_args()
+    arg = p.parse_args(argv[1:])
+    VERBOSE = arg.v
     arg.o = arg.o or sys.stdout
     arg.prog = sys.argv[0]
     arg.cmds = []
     for cmd in arg.commands:
-        arg.cmds.append(parse_cmd(cmd, verbose=arg.v))
+        arg.cmds.append(parse_cmd(cmd))
 
     return arg
 
@@ -62,61 +65,64 @@ def register_cmd(func=None, *, name=None):
     CMD_MAP[func.__name__] = func
     return func
 
-
-def parse_cmd(command, verbose=0):
-    'syntax:  [fieldname=]funcname:arg,arg,.. or field~regex'
-    try:
-        if len(command) < 1:
-            raise ValueError('empty command string!')
-    except Exception as e:
-        raise ValueError('parse_cmd failed {}'.format(repr(e)))
-
-    parts = re.split('(=|:|,|~)', command)
-    seps = parts[1::2] + ['']
-    fields = parts[::2]
-    cmd, lhs, rhs = None, [], []
-
-    if len(seps) == 0:
-        cmd = fields.pop()
-        return [command, cmd, lhs, rhs]   # command without lhs or rhs
-
-    ptr = lhs  # start collecting for lhs
-    oldtok = None # previous separator
-    for tok, val in zip(seps, fields):
-        if tok == '=':
-            ptr.append(val)      # last part for lhs
-            ptr = rhs            # now collect for rhs
-        elif tok == ',':
-            ptr.append(val)      # collect an item for lhs/rhs
-        elif tok == ':':
-            ptr = rhs            # func w/ args, start collecting rhs
+def parse_cmd(command):
+    tokens = tokenizer(command)
+    argsep = ', ='.split()
+    funcsep = ': ~'.split()
+    lhs, cmd, rhs = [], None, []
+    ptr = lhs
+    oldopc = ''
+    for opcode, val in tokens:
+        if opcode == '=':
+            ptr.append(val)
+            ptr = rhs
+        elif opcode == ',':
+            ptr.append(val)
+        elif opcode == ':':
+            cmd = val
+            ptr = rhs
+        elif opcode == '~':
+            ptr.append(val)
+            cmd = 'regex'
+            ptr = rhs
+        # opcode is empty at this point
+        elif oldopc == ',':
+            ptr.append(val)
+        elif oldopc == '=':
             if cmd is None:
                 cmd = val
             else:
-                raise ValueError('{} <- misplaced :'.format(command))
-        elif tok == '~':
-            if len(val):
-                ptr.append(val)  # last for lhs
-            if cmd is not None:
-                print('error in', command)
-            cmd = 'regex'        # only cmd without a name
-            ptr = rhs
-        elif len(tok) == 0:
-            if oldtok == ',':
                 ptr.append(val)
-            elif oldtok == '=':
-                if cmd is None:
-                    cmd = val
-                else:
-                    ptr.append(val)
-            else:
-                if len(val):
-                    ptr.append(val)
-        oldtok = tok
+        else:
+            ptr.append(val)
 
-    # default to keep command if it is None
+        oldopc = opcode
+
     cmd = 'keep' if cmd is None else cmd
     return [command, cmd, lhs, rhs]
+
+
+def tokenizer(command):
+    tokens = []
+    value = []
+    seps = ': = , ~'.split()
+    escape = '\\'
+
+    for c in command:
+        if c in seps:
+            if len(value) == 0:
+                tokens.append((c,c))
+            elif value[-1] == escape:
+                value[-1] = c
+            else:
+                tokens.append((c, ''.join(value)))
+                value.clear()
+        else:
+            value.append(c)
+
+    if len(value):
+        tokens.append(('', ''.join(value)))
+    return tokens
 
 
 def cmd_str(cmd, lhs, rhs):
@@ -141,10 +147,10 @@ def cmd_error(df, lhs, rhs, errors):
 
     # list help when being verbose
     if args.v:
-        prn(0, '[{}] doc'.format(func.__name__))
-        prn(0, '---')
-        prn(0, func.__doc__)
-        prn(0, '---')
+        prn(1, '[{}] doc'.format(func.__name__))
+        prn(1, '---')
+        prn(1, func.__doc__)
+        prn(1, '---')
 
     sys.exit(1)
 
@@ -157,9 +163,12 @@ def cmd_unknown(df, lhs, rhs):
 #-- helpers
 def prn(level, *words, output=sys.stderr):
     'possibly print stuff'
-    if level > args.v:
+    if level > VERBOSE:
         return
-    print(' '.join(str(x) for x in words), file=output)
+    name = sys._getframe(1).f_code.co_name  # is real/org func name
+    func = globals().get(name, None)  # registered name may be different
+    name = func.__name__ if func else '>>'
+    print('{}:'.format(name) + ' '.join(str(x) for x in words), file=output)
 
 
 def load_csv(filename):
@@ -171,10 +180,10 @@ def load_csv(filename):
         prn(0, 'cannot read {}'.format(filename))
         return pd.DataFrame()  # empty dataframe
 
-    prn(1, ' - columns names original  : {}'.format(df.columns.values))
+    prn(1, 'original column names: {}'.format(df.columns.values))
     df.columns = [normalize(n) for n in df.columns]
-    prn(1, ' - columns names normalized: {}'.format(df.columns.values))
-    prn(1, ' - num of entries: {}'.format(len(df)))
+    prn(1, 'normalized column names: {}'.format(df.columns.values))
+    prn(1, '{} entries loaded'.format(len(df)))
 
     return df
 
@@ -199,46 +208,6 @@ def unknown_fields(df, fields):
     'return list of unknown fields'
     return [x for x in fields if x not in df.columns]
 
-
-def show_info(df=None):
-    prn(0, '\n' + '-'*60, args.prog, 'info\n')
-
-    prn(0, '-'*30, 'flags\n')
-    prn(0, 'verbosity level (-v) ', args.v)
-    prn(0, 'input file      (-i) ', args.i)
-    prn(0, 'output file     (-o) ', args.o)
-
-    if len(args.commands):
-        prn(0, '\n' + '-'*30, 'cli commands\n')
-        maxl = max(len(c) for c in args.commands)
-        for idx, txt in enumerate(args.commands):
-            org, cmd, dst, arg = args.cmds[idx]
-            c = CMD_MAP.get(cmd, None)
-            if c:
-                prn(0, 'cmd {:02}'.format(idx),
-                    '{:{w}}  => {}({},{}) '.format(txt, c.__name__, dst,
-                                                  repr(arg), w=maxl))
-            else:
-                prn(0, 'cmd {:02}'.format(idx),
-                    '{:{w}}  => ip lookup: {}({},{})'.format(txt, cmd, dst,
-                                                            repr(arg), w=maxl))
-
-    prn(0, '\n' + '-'*30, 'available cmds\n')
-    for k, v in sorted(CMD_MAP.items()):
-        prn(0, v.__doc__)
-
-    if df is not None:
-        prn(0, '\n' + '-'*30, 'DataFrame\n')
-        prn(0, '{} rows by {} columns'.format(*df.shape))
-        maxl = max(len(c) for c in df.columns.values)+2  # +2 for !r quotes
-        prn(0, '{:{w}} - {}'.format('Column', 'DataType', w=maxl))
-        for col in df.columns:
-            prn(0, '{!r:{w}}   {}'.format(col, df[col].dtype, w=maxl))
-        prn(0, '{:{w}}   {}'.format('<index>', df.index.dtype, w=maxl))
-        prn(0, '\nFirst 3 rows')
-        prn(0, df.head(3))
-
-    prn(0, '\n' + '-'*60, 'info end', '\n')
 
 #-- IP Table lookup
 def load_ipt(filename, ip_field=None):
@@ -294,42 +263,39 @@ def load_ipt(filename, ip_field=None):
     return ipt
 
 #-- commands
-
-
 @register_cmd
-def lpf(df, lhs, rhs):
-    'f1[,..]=lpf:table,f2,f3 - lookup f2 in table, get f3 and assign to f1[,..]'
+def pfx(df, lhs, rhs):
+    'f1[,..]=pfx:table,f,g1[,..] - get table(f) -> g1,.. & assign to f1,..'
 
     # sanity check lhs, rhs
     errors = []
     if len(lhs) < 1:
         errors.append('need 1+ lhs fields to assign to')
-    if len(rhs) != 3:
-        errors.append('need table, colname & resulting field in rhs')
+    if len(rhs) != len(lhs) + 2:
+        errors.append('need table, key & same number of rhs fields as in lhs')
     if not (os.path.isfile(rhs[0]) or os.path.isfile('{}.csv'.format(rhs[0]))):
         errors.append('cannot find lookup table {!r} on disk'.format(rhs[0]))
     if len(errors):
         cmd_error(df, lhs, rhs, errors)
 
     # get cached table, or read from disk
-    table, src, result = rhs
+    table, src, *getfields = rhs
     ipt = IPT_MAP.setdefault(table, load_ipt(table))
 
     # sanity check ip lookup table
     if len(ipt) < 1:
         errors.append('lookup table appears empty')
     tmp = ipt[ipt.keys()[0]]   # get a sample row, must be Series or dict
-    if result not in tmp.keys():
-        errors.append('field {!r} not available in lookup table'.format(result))
+    for unknown in [g for g in getfields if g not in tmp.keys()]:
+        errors.append('field {!r} not available in {}'.format(unknown, table))
     if src not in df.columns:
         errors.append('field {!r} not available in dataframe'.format(src))
     if len(errors):
         cmd_error(df, lhs, rhs, errors)
 
     def lookup(key):
-        'lookup func to apply to src column'
         try:
-            return str(ipt[key][result])
+            return ipt[key][getfield]
         except KeyError:
             return 'n/a'
         except ValueError:
@@ -337,8 +303,58 @@ def lpf(df, lhs, rhs):
         except Exception as e:
             cmd_error(df, lhs, rhs, [repr(e)])
 
-    for dst in lhs:
-        df[dst] = df[src].apply(lookup)
+    try:
+        # a lookup that returns ipt[key][getfields] all at once is actually
+        # slower than getting field for field in a for loop, go figure ...
+        for dst, getfield in zip(lhs, getfields):
+            df[dst] = df[src].apply(lookup)
+    except (KeyError, ValueError) as e:
+        cmd_error(df, lhs, rhs, [repr(e)])
+    except Exception as e:
+        cmd_error(df, lhs, rhs, ['runtime error', repr(e)])
+
+    return df
+
+@register_cmd
+def show(df=None, *rest):
+    prn(0, '\n' + '-'*60, args.prog, 'info\n')
+
+    prn(0, '-'*30, 'flags\n')
+    prn(0, 'verbosity level (-v) ', args.v)
+    prn(0, 'input file      (-i) ', args.i)
+    prn(0, 'output file     (-o) ', args.o)
+
+    if len(args.commands):
+        prn(0, '\n' + '-'*30, 'cli commands\n')
+        maxl = max(len(c) for c in args.commands)
+        for idx, txt in enumerate(args.commands):
+            org, cmd, dst, arg = args.cmds[idx]
+            c = CMD_MAP.get(cmd, None)
+            if c:
+                prn(0, 'cmd {:02}'.format(idx),
+                    '{:{w}}  => {}({},{}) '.format(txt, c.__name__, dst,
+                                                  repr(arg), w=maxl))
+            else:
+                prn(0, 'cmd {:02}'.format(idx),
+                    '{:{w}}  => ip lookup: {}({},{})'.format(txt, cmd, dst,
+                                                            repr(arg), w=maxl))
+
+    prn(0, '\n' + '-'*30, 'available cmds\n')
+    for k, v in sorted(CMD_MAP.items()):
+        prn(0, v.__doc__)
+
+    if df is not None:
+        prn(0, '\n' + '-'*30, 'DataFrame\n')
+        prn(0, '{} rows by {} columns'.format(*df.shape))
+        maxl = max(len(c) for c in df.columns.values)+2  # +2 for !r quotes
+        prn(0, '{:{w}} - {}'.format('Column', 'DataType', w=maxl))
+        for col in df.columns:
+            prn(0, '{!r:{w}}   {}'.format(col, df[col].dtype, w=maxl))
+        prn(0, '{:{w}}   {}'.format('<index>', df.index.dtype, w=maxl))
+        prn(0, '\nFirst 3 rows')
+        prn(0, df.head(3))
+
+    prn(0, '\n' + '-'*60, 'info end', '\n')
 
     return df
 
@@ -670,7 +686,7 @@ def inf(df, lhs, rhs):
     if len(errors):
         cmd_error(df, lhs, rhs, errors)
 
-    prn(1, '- filter rows by range {!r} on fields {!r}'.format(rhs, lhs))
+    prn(1, 'filter rows by range {!r} on fields {!r}'.format(rhs, lhs))
     n1 = len(df.index)
     df = df[df[lhs].apply(lambda r: any(str(f) in rhs for f in r), axis=1)]
     n2 = len(df.index)
@@ -682,6 +698,30 @@ def inf(df, lhs, rhs):
 @register_cmd
 def inrange(df, lhs, rhs):
     'f1[f2,..]=inrange:v1,v2 - select rows where v1 <= f1(or f2,..) <= v2'
+
+    # sanity check lhs, rhs
+    errors = []
+    if len(lhs) < 1:
+        errors.append('need 1+ lhs fields')
+    if len(rhs) != 2:
+        errors.append('need exactly 2 rhs fields for min,max')
+    for unknown in unknown_fields(df, lhs):
+        errors.append('field {!r} not available'.format(unknown))
+    if len(errors):
+        cmd_error(df, lhs, rhs, errors)
+
+    prn(1, 'filtering rows by {!r} {} <= field <= {}'.format(lhs, *rhs))
+    n1 = len(df.index)
+    minval, maxval = list(map(int, rhs))  # ensure integers
+
+    try:
+        df = df[df[lhs].apply(lambda r: any(minval <= f <= maxval for f in r), axis=1)]
+    except (TypeError, ValueError) as e:
+        errors.append('{!r} contains non-numeric data: {}'.format(lhs, repr(e)))
+        cmd_error(df, lhs, rhs, errors)
+
+    n2 = len(df.index)
+    prn(0, '{} -> {} rows ({} filtered)'.format(n1, n2, n1-n2))
     return df
 
 @register_cmd
@@ -716,12 +756,64 @@ def lte(df, lhs, rhs):
 @register_cmd
 def gte(df, lhs, rhs):
     'f1[f2,..]=gte:v1 - rows where f1(or f2,..) >= v1'
+
+    # sanity check lhs, rhs
+    errors = []
+    if len(lhs) < 1:
+        errors.append('need 1+ lhs fields')
+    if len(rhs) != 1:
+        errors.append('need exactly 1 rhs field')
+    for unknown in unknown_fields(df, lhs):
+        errors.append('field {!r} not available'.format(unknown))
+    if len(errors):
+        cmd_error(df, lhs, rhs, errors)
+
+    prn(1, 'filtering rows by {!r} >= {}'.format(lhs, rhs[0]))
+    n1 = len(df.index)
+    minval = int(rhs[0])  # ensure this is an integer
+
+    try:
+        df = df[df[lhs].apply(lambda r: any(f >= minval for f in r), axis=1)]
+    except (TypeError, ValueError) as e:
+        errors.append('{!r} contains non-numeric data: {}'.format(lhs, repr(e)))
+        cmd_error(df, lhs, rhs, errors)
+
+    n2 = len(df.index)
+    prn(0, '{} -> {} rows ({} filtered)'.format(n1, n2, n1-n2))
     return df
 
 
 @register_cmd(name='sum')
 def sumf(df, lhs, rhs):
-    'dst=sum:[f1,f2,..] - sums/counts across similar column groups or rows'
+    'f1=sum:[f2,f3,..] - sums f1 or counts [f2,f3,..] across similar ows'
+
+    # sanity check lhs, rhs
+    errors = []
+    if len(lhs) != 1 or len(lhs[0]) < 1:
+        errors.append('need exactly 1 lhs field')
+    for unknown in unknown_fields(df, rhs):
+        errors.append('{!r} field not available'.format(unknown))
+    if len(errors):
+        cmd_error(df, lhs, rhs, errors)
+
+    dst = lhs[0]
+    if len(rhs) == 0:
+        prn(1, 'assuming all columns remain in result')
+        rhs = [c for c in df.columns.values if c != dst]
+
+    if dst not in df.columns:
+        df[dst] = 1
+    elif df[dst].dtype not in ['int64', 'float64']:
+        errors.append('{!r} is not numeric'.format(dst))
+        errors.append('available columns and types are:')
+        for name, typ in df.dtypes.items():
+            errors.append('{}:{}'.format(name, typ))
+        cmd_error(df, lhs, rhs, errors)
+
+    try:
+        df = df.groupby(rhs, as_index=False).agg({dst: 'sum'})
+    except (KeyError, ValueError) as e:
+        cmd_error(df, lhs, rhs, [repr(e)])
     return df
 
 
@@ -737,7 +829,7 @@ def main():
         try:
             func = CMD_MAP.get(cmd, None)
             if func is None:
-                prn(0, "no function implementation for {}, {}".format(lhs, rhs))
+                prn(0, "no implementation for {}, {}, {}".format(lhs, cmd, rhs))
                 sys.exit(1)
             df = func(df, lhs, rhs)
         except ValueError as e:
@@ -751,5 +843,5 @@ def main():
 
 
 if __name__ == '__main__':
-    args = parse_args()
+    args = parse_args(sys.argv)
     sys.exit(main())

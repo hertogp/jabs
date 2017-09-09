@@ -12,7 +12,6 @@ _notes.md
 nosetests.xml
 
 # directories
-dta/
 scr/
 tmp/
 venv/
