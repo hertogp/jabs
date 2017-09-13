@@ -12,6 +12,7 @@ _notes.md
 nosetests.xml
 
 # directories
+.cache
 scr/
 tmp/
 venv/

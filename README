@@ -1,16 +1,6 @@
 # JABS
 
-Just automating (some) boring stuff
-
-To try some scripts out, simply:
-
-- cd ~/dev/   # or where-ever
-- python3 -m venv venv
-- git clone https://github.com/hertogp/jabs.git
-- pip install < requirements.txt
-
-after which the repo should've been duplicated locally.
-You can now use the scripts.  See sections below.
+Small collection of utilities for enriching/filtering log-files
 
 
 ## namedrop
@@ -18,37 +8,15 @@ You can now use the scripts.  See sections below.
 A basic script to add columns to a log.csv file, using ip addresses
 and/or prefixes to lookup stuff in other files.  For example:
 
-file: hosts.csv
-    ip,name,other
-    1.1.1.1,h_one,internet
-    10.10.10.10,h_10,local
+## dfm - dataframe manipulation
 
+Makes namedrop obsolete.  dfm allows commandline manipulation of a log file
+read into a pandas dataframe.  Add, delete, keep columns or filter rows based
+on a regex.  Rows can be filtered using a regex on columns or an ip filter.
 
-file: subnets.csv
-    subnet,name,vpn
-    1.0.0.0/8,Internet,n/a
-    10.0.0.0/8,rfc1918,my_org
+o 2do traffic patterns can be tagged using cmd: f=tag:rulebase,src,dst[,port]
 
+## ipf - ip  filter
 
-file: logs.csv
-    src,dst,proto
-    10.10.10.1,1.1.1.1,80
-    10.10.10.10,1.1.1.1,80
-
-then:
-
-    cd examples
-    ../namedrop logs.csv -t a:ip:hosts.csv -t b:subnet:subnets.csv -a src:a:name -a src:a:other -a src:b:name -a dst:b:vpn
-
-yields:
-
-    src,src_name,src_other,src_name,dst,dst_vpn,proto
-    10.10.10.1,no_info,no_info,rfc1918,1.1.1.1,n/a,80
-    10.10.10.10,h_10,local,rfc1918,1.1.1.1,n/a,80
-
-where:
-- 1st src_name = hosts.csv{src} -> name
-- src_other = hosts.csv{src} -> other
-- 2nd src_name = subnets.csv{src} -> name
-- dst_vpn = subnets.csv{dst} -> vpn
-
+Helper module used by dfm for ip filtering using a firewall-like rulebase with
+src,dst,port,action,tag.

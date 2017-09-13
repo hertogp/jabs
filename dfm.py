@@ -42,14 +42,14 @@ def parse_args(argv):
     padd('-i', required=True, type=str, default='',
          help='csv input filename to process')
     padd('-V', '--version', action='version',
-         version='%(prog)s {}'.format(__version__))
+         version='{} {}'.format(argv[0], __version__))
     padd('commands', nargs='*')
 
     # parse & sanitize the arguments
     arg = p.parse_args(argv[1:])
     VERBOSE = arg.v
     arg.o = arg.o or sys.stdout
-    arg.prog = sys.argv[0]
+    arg.prog = argv[0]
     arg.cmds = []
     for cmd in arg.commands:
         arg.cmds.append(parse_cmd(cmd))
@@ -66,15 +66,18 @@ def register_cmd(func=None, *, name=None):
     return func
 
 def parse_cmd(command):
+    'take a single command string and return [orgstring, cmd, lhs, rhs]'
     tokens = tokenizer(command)
-    argsep = ', ='.split()
-    funcsep = ': ~'.split()
-    lhs, cmd, rhs = [], None, []
-    ptr = lhs
-    oldopc = ''
+    argsep = ', ='.split()         # these split fields
+    funcsep = ': ~'.split()        # these trigger func resp. regex
+    lhs, cmd, rhs = [], None, []   # intended result values
+    ptr = lhs                      # used to switch between lhs and rhs
+    oldopc = ''                    # previous opcode seen
     for opcode, val in tokens:
         if opcode == '=':
-            ptr.append(val)
+            if val != '=':
+                # '=func'
+                ptr.append(val)
             ptr = rhs
         elif opcode == ',':
             ptr.append(val)
@@ -82,14 +85,19 @@ def parse_cmd(command):
             cmd = val
             ptr = rhs
         elif opcode == '~':
-            ptr.append(val)
+            # support both: f1,f2=~a1 and f1,f2~a1
+            if val != '~':
+                # f1~a1 case
+                ptr.append(val)
             cmd = 'regex'
             ptr = rhs
         # opcode is empty at this point
         elif oldopc == ',':
+            # when cmd is just a list of fields like 'f1,f2'
             ptr.append(val)
         elif oldopc == '=':
             if cmd is None:
+                # when cmd is '=func'
                 cmd = val
             else:
                 ptr.append(val)
@@ -103,6 +111,7 @@ def parse_cmd(command):
 
 
 def tokenizer(command):
+    'tokenize a string into a list of (sep, value)'
     tokens = []
     value = []
     seps = ': = , ~'.split()
