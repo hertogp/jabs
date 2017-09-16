@@ -220,7 +220,3 @@ class TestIpProto(object):
             p.proto_toname('1')
             p.proto_byname(16)
 
-
-class TestIpFilter(object):
-    pass
-

@@ -14,91 +14,22 @@ import pandas as pd
 import numpy as np
 import pytricia as pt
 
+from util import *
+
 #-- helpers
-def load_csv(fname):
-    'load a csv into a df and sanitize column names'
-    # raises OSError or IOError is file is unreadable
-    fname = fname if os.path.isfile(fname) else '{}.csv'.format(fname)
-    df = pd.read_csv(fname)
+# def load_csv(fname):
+#     'load a csv into a df and sanitize column names'
+#     # raises OSError or IOError is file is unreadable
+#     fname = fname if os.path.isfile(fname) else '{}.csv'.format(fname)
+#     df = pd.read_csv(fname)
 
-    # sanitize columns names
-    df.columns = df.columns.str.replace(' ', '_')
-    df.columns = df.columns.str.lower()
+#     # sanitize columns names
+#     df.columns = df.columns.str.replace(' ', '_')
+#     df.columns = df.columns.str.lower()
 
-    return df
+#     return df
 
-def str2list(a_string):
-    'split a string into a list of constituents'
-    try:
-        return [x for x in re.split(' |,', a_string) if len(x)]
-    except (TypeError, ValueError):
-        raise ValueError('{!r} doesnt look like a string'.format(a_string))
 
-def pfx_fromstr(pfxstr):
-    'turn a single pfx-string into a well-formatted pfx'
-    try:
-        # support shorthands like 10/8, and use a /32 by default
-        if '/' not in pfxstr:
-            prefix = '{}/32'.format(pfxstr)
-        elif pfxstr.endswith('/'):
-            prefix = '{}32'.format(pfxstr)
-        else:
-            prefix = pfxstr
-
-        addr, msk = prefix.split('/', 1)
-        addr = '.'.join('{}.0.0.0'.format(addr).split('.')[0:4])
-    except Exception as e:
-        raise IpfError('cannot turn {!r} into a valid prefix'.format(pfxstr))
-
-    return '{}/{}'.format(addr, msk)
-
-def ival_topfx(uint, numh):
-    'turn a proper (start uint, num_hosts)-tuple into a pfx'
-    # proper means uint is a this-network address and
-    # num_hosts is a power of two (<= 2**32)
-    mask = 2**32 - numh
-    plen = 32 - int(math.log(numh) / math.log(2))
-    uint = uint & mask
-    d1 = (uint // 16777216)  & 0x000000FF
-    d2 = (uint // 65536) & 0x000000FF
-    d3 = (uint // 256) & 0x000000FF
-    d4 = uint & 0x000000FF
-    return '{}.{}.{}.{}/{}'.format(d1,d2,d3,d4,plen)
-
-def ival_frompfx(pfx):
-    'turn properly formatted pfx into (start uint, num_hosts) tuple'
-    x = list(map(int, re.split('\.|/', pfx)))
-    uint = x[0] * 16777216 + x[1] * 65536 + x[2] * 256 + x[3]
-    numh = 2**(32-x[4])
-    return (uint & (2**32 - numh), numh)
-
-def summarize_pfxs(pfxlst):
-    'remove redundancy from a list of (im)properly formatted pfx-strings'
-    # blatant disregard for ipv6
-    rv, heap = [], []
-    for pfx in map(pfx_fromstr, pfxlst):  # properly formatted pfxs
-        x = list(map(int, re.split('\.|/', pfx)))
-        uint = x[0] * 16777216 + x[1] * 65536 + x[2] * 256 + x[3]
-        numh = 2**(32-x[4])
-        mask = 2**32 - numh
-        heap.append((uint & mask, numh))
-
-    heap = list(reversed(sorted(heap)))
-    # absorb/join or keep adjacent (start, length)-intervals
-    while len(heap):
-        x = heap.pop()
-        if len(heap) == 0:
-            rv.append(ival_topfx(*x))
-            break
-        y = heap.pop()
-        if x[1] == y[1] and sum(x) == y[0]:
-            heap.append((x[0], x[1] + y[1]))  # x joins y
-        elif x[0] <= y[0] and sum(y) <= sum(x):
-            heap.append(x)                    # x absorbs y
-        else:
-            rv.append(ival_topfx(*x))         # no joy, x in final result
-            heap.append(y)                    # y may absorb/join next one
-    return rv
 
 class IpfError(Exception):
     pass
@@ -346,10 +277,10 @@ class IpFilter(object):
     def add(self, rid, srcs, dsts, ports, action='', tag=''):
         'add a new rule or just add src and/or dst to an existing rule'
         for pfx in str2list(srcs):
-            self._set_pfx(rid, self._src, pfx_fromstr(pfx))
+            self._set_pfx(rid, self._src, pfx_proper(pfx))
 
         for pfx in str2list(dsts):
-            self._set_pfx(rid, self._dst, pfx_fromstr(pfx))
+            self._set_pfx(rid, self._dst, pfx_proper(pfx))
 
         for port in str2list(ports):
             self._set_port(rid, port)
@@ -430,8 +361,8 @@ class IpFilter(object):
 
         # sanitize more specifics in a src/dst list of a rule
         for r, lst in rules.items():
-            lst[0] = summarize_pfxs(lst[0])
-            lst[1] = summarize_pfxs(lst[1])
+            lst[0] = pfx_summary(lst[0])
+            lst[1] = pfx_summary(lst[1])
 
         return rules
 
