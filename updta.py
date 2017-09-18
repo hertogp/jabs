@@ -8,6 +8,7 @@ usage: ./updta.py
 '''
 
 import sys
+import json
 import pandas as pd
 import numpy as np
 
@@ -16,32 +17,50 @@ URL_SERVICES = 'https://www.iana.org/assignments/service-names-port-numbers/serv
 
 
 def load_csv(url):
+    'load a csv into a df and normalize columns name somewhat'
     df = pd.read_csv(url)
     df.columns = df.columns.str.lower()
     df.columns = df.columns.str.replace(r'\s+', '_')
     return df
 
 def write_csv(df, fname):
+    'write a csv without index for filename'
     df.to_csv(fname, index=False, mode='w')
     return df
 
-def load_protocols(url, fname):
+def protocol_tojson(df, fname):
+    'write protocols to json files'
+    # store ip protocol info in json, so we dont need pandas afterwards
+    dd = df.drop_duplicates()
+    dct = dict(zip(dd.index, zip(dd['keyword'], dd['protocol'])))
+    with open('dta/ip4-protocols.json', 'w') as outfile:
+        json.dump(dct, fp=outfile)
+        print('length', len(dct))
+
+def services_tojson(df, fname):
+    'write services to json files'
+
+
+def load_protocols(url):
     'load protocol numbers from iana and prep a ip4-protocols.csv file'
     # get & prep IPv4 protocol names
-    cols = 'decimal keyword protocol'.split()
     df = load_csv(url)
-
-    # keep interesting columns & drop rows where decimal/keyword are nan's
+    df.to_csv('dta/hmm')
+    cols = 'decimal keyword protocol'.split()
     df = df[cols]
-    df = df.dropna(subset=['decimal'])
+    # df = df.dropna(subset=['keyword'])
 
     # clean up values
     df['protocol'] = df['protocol'].str.replace(r'\s+', ' ') # clean spaces
+
+    df['keyword'] = df['keyword'].str.strip()
     df['keyword'] = df['keyword'].str.replace(r'\s.*$', '')  # 1st word
     df['keyword'] = df['keyword'].str.lower()
+
     df['decimal'] = df['decimal'].astype(str)   # ensure they're all strings!
     df['decimal'] = df['decimal'].str.replace(r'\s+', '')  # no whitespace
     df = df.drop_duplicates(subset='decimal', keep='first')  # drop dups
+
 
     # eliminate protocol-ranges by making them explicit
     rows = []
@@ -49,26 +68,31 @@ def load_protocols(url, fname):
         parts = row['decimal'].split('-')
         start = int(parts[0])
         stop  = int(parts[-1])
-        keyw = 'ip4-{}'.format(num) if not row['keyword'] else row['keyword']
         proto = row['protocol']
+        orgkey =  row['keyword']
         for num in range(start, stop+1):
+            keyw = '{}/ip'.format(num) if pd.isnull(orgkey) else orgkey
             rows.append({'decimal': str(num),
                          'keyword': keyw,
                          'protocol': proto})
 
     df = df.append(rows, ignore_index=True)
-    df = df[~df['decimal'].str.contains('-')]
-    # set NaN keywords to <nr>
+    df = df[~df['decimal'].str.contains('-')]  # drop the 'start-max' entries
+
+    # set any remaining NaN keywords to <nr>
+    # donot use '{}/ip'.format(df['decimal']) <-- insert whole decimal column ..
     df['keyword'] = np.where(df['keyword'].isnull(),
-                             '<' + df['decimal'] + '/ip>',
+                             df['decimal'] + '/ip',
                              df['keyword'])
 
+    # set any remaining NaN protocols to keyword
     df['protocol'] = np.where(df['protocol'].isnull(),
-                              '<' + df['keyword'] +'>',
+                              df['keyword'],
                               df['protocol'])
-    write_csv(df, fname)
 
-    return len(df)
+    df = df.set_index('decimal')
+    return df
+
 
 def load_services(url, fname):
     'load ip4 services from iana and prep ip4-services.csv file'
@@ -100,15 +124,18 @@ def load_services(url, fname):
     df = df.append(rows, ignore_index=True)
     df = df[~df['port_number'].str.contains('-')]
 
-    write_csv(df, fname)
-
-    return len(df)
+    return df
 
 if __name__ == '__main__':
 
-    n = load_protocols(URL_PROTOCOLS, 'dta/ip4-protocols.csv')
-    print('loaded {:5} ipv4-protocol entries'.format(n))
+    dfp = load_protocols(URL_PROTOCOLS)
+    write_csv(dfp, 'dta/ip4-protocols.csv')
+    protocol_tojson(dfp, 'dta/ip4-protocols.json')
+    print('got & stored {:5} ipv4-protocol entries'.format(len(dfp.index)))
 
-    n = load_services(URL_SERVICES, 'dta/ip4-services.csv')
-    print('loaded {:5} ipv4-service entries'.format(n))
+    sys.exit(0)
+
+    dfs = load_services(URL_SERVICES, 'dta/ip4-services.csv')
+    write_csv(dfs, 'dta/ip4-services.csv')
+    print('got & stored {:5} ipv4-service entries'.format(len(dfs.index)))
 

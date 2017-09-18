@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
 '''
-dfm - dataframe manipulations
-
-usage:  dfm -i input.csv command [command ...]
+syntax: dfm command, ...
+info: read, manipulate and write datasets
+descr:
+    dataframe manipulations
 '''
 
 # TODO
 # add f1[,..]=fillna:value
+# solve dfm help:func: parses to []=func:[], should be []=help:[func:]
+#  - also means we need to strip off any trailing ':'
 #
 import os
 import sys
@@ -129,38 +132,49 @@ class Commander(object):
         self.ipf = {}                          # {name} -> ip filter
         self.ipt = {}                          # {name} -> ip tagger
         self.filename = filename
-        # only load a filename if asked, otherwise just return empty instance
-        self.dfm = filename if filename is None else self.load_csv(filename)
+        self.dfm = None
+        self.saved = False                     # True when cmd_write has run
+        if filename:
+            self.dfm = self.load_csv(filename)
 
         # create help dict for available commands
         self.hlp = {}
         cp = configparser.ConfigParser()
         for attr in [x for x in dir(self) if x.startswith('cmd_')]:
             func = getattr(self, attr)
-            cp.read_string('[doc]\n' + func.__doc__)
+            doc = func.__doc__ if func.__doc__ else ''
+            cp.read_string('[doc]\n' + doc)
             self.hlp[attr] = {
                 'syntax': cp['doc'].get('syntax', 'n/a').strip(),
                 'info': cp['doc'].get('info', 'n/a').strip(),
                 'descr': cp['doc'].get('descr', 'n/a').strip()
             }
+        # also load doc string of the class as generic help for dfm command
+        cp.read_string('[doc]\n' + __doc__)
+        self.hlp['dfm'] = {
+            'syntax': cp['doc'].get('syntax', 'n/a').strip(),
+            'info': cp['doc'].get('info', 'n/a').strip(),
+            'descr': cp['doc'].get('descr', 'n/a').strip(),
+        }
+
 
     def load_csv(self, fname):
         'return a dataframe loaded from a csv file, w/ normalized column names'
         filename = fname if os.path.isfile(fname) else '{}.csv'.format(fname)
         errors = []
         try:
-            dfc = pd.read_csv(filename, skipinitialspace=True)
+            df = pd.read_csv(filename, skipinitialspace=True)
         except (IOError, OSError):
-            errors.append('loading csv request for {}'.format(fname))
-            errors.append('could not read {}'.format(fname))
-            errors.append('also could not read alt-name {}'.format(filename))
-            self.fatal(errors, [], [])
+            errors.append('loading csv request for {!r}'.format(fname))
+            errors.append('could not read {!r}'.format(fname))
+            errors.append('also could not read alt-name {!r}'.format(filename))
+            self.fatal(errors, None, None)
 
-        dfc.columns = [normalize(n) for n in dfc.columns]
-        log.info('normalized columns names are [' +
-                 ','.join(dfc.columns.values) +']')
+        log.debug('original columns names  : {}'.format(df.columns.values))
+        df.columns = [normalize(n) for n in df.columns]
+        log.debug('normalized columns names: {}'.format(df.columns.values))
 
-        return dfc
+        return df
 
     def from_csv(self, fname):
         self.dfm = self.load_csv(fname)
@@ -173,13 +187,15 @@ class Commander(object):
         if self.ipl.has_key(name):
             return self.ipl[name]
 
+        # no joy on cache, so load from disk
         errors = []
         fname = name if os.path.isfile(name) else '{}.csv'.format(name)
         try:
             ipl = load_csv(fname)
         except (OSError, IOError) as e:
-            errors.append('cannot find {}[.csv]!'.format(name))
-            self.fatal(errors, [], [])
+            errors.append('tried {!r}, but no joy'.format(name))
+            errors.append('tried {!r} as well, still no joy'.format(filename))
+            self.fatal(errors, None, None)
 
         # find suitable field
         tmp = pt.PyTricia()
@@ -217,24 +233,38 @@ class Commander(object):
                 # prn(0, 'current row is', row)
                 sys.exit(1)
 
-        return ipt
+        return ipl
 
-    def write(self, output=sys.stdout):
+    def to_csv(self, output=sys.stdout):
         'output self.dfm to sys.stdout or a file'
-        self.dfm.to_csv(output, index=False, mode='w')
+        if self.dfm is not None:
+            self.dfm.to_csv(output, index=False, mode='w')
+        else:
+            log.info('nothing to write.')
         return self
 
-    def unknowns(self, fields):
-        'return the subset of fields that are not columns in self.dfm'
-        return [x for x in fields if x not in self.dfm.columns]
+    def check_fields(self, errors, fields):
+        'check for missing fields, report by appending to errors'
+        oldlen = len(errors)
+        for field in [x for x in fields if x not in self.dfm.columns]:
+            errors.append('field {!r} not available at this time'.format(field))
+        if len(errors) > oldlen:
+            errors.append('valid fields: {}'.format(self.dfm.columns.values))
+        return self
 
-    def fatal(self, errors, lhs, rhs):
+    def fatal(self, errors, lhs=None, rhs=None):
         'log fatal errors and exit(1) if any'
         if len(errors):
-            caller = sys._getframe(1).f_code.co_name.replace('cmd_','')  # is real/org func name
-            log.critical('{}={}:{}'.format(lhs, caller, rhs))
+            caller = sys._getframe(1).f_code.co_name.replace('cmd_', '')
+
+            if lhs is None and rhs is None:
+                log.error('{} aborting:'.format(caller))
+            else:
+                log.error('{}={}:{} aborting:'.format(lhs, caller, rhs))
+
             for error in errors:
-                log.critical('{}: {}'.format(caller,error))
+                log.error('{}: {}'.format(caller,error))
+
             sys.exit(1)
 
         return self
@@ -247,6 +277,87 @@ class Commander(object):
         else:
             log.warn('skipping unknown cmd {}'.format(cmd))
 
+        return self
+
+    def cmd_r(self, lhs, rhs):
+        return self.cmd_read(lhs, rhs)
+
+    def cmd_read(self, lhs, rhs):
+        '''
+        syntax: read:filename
+        info: discard any existing dataframe and load new one from csv-file
+        descr:
+          Usually the first command in a stream that loads a dataset.
+
+          For convenience, the abbreviation r:filename is an alias for read:
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) != 0:
+            errors.append('no lhs-fields allowed')
+        if len(rhs) !=1:
+            errors.append('need exactly 1 rhs-field')
+
+        fname = rhs[0] if rhs[0].endswith('csv') else '{}.csv'.format(rhs[0])
+        if os.path.isfile(rhs[0]):
+            fname = rhs[0]
+        elif os.path.isfile('{}.csv'.format(rhs[0])):
+            fname = '{}.csv'.format(rhs[0])
+        else:
+            errors.append('cannot read {!r}'.format(rhs[0]))
+
+        self.fatal(errors, lhs, rhs)
+
+        try:
+            self.dfm = self.load_csv(fname)
+            log.info('read {}'.format(fname))
+            log.info('rows, columns is {}'.format(self.dfm.shape))
+            log.info('column names: {}'.format(self.dfm.columns.values))
+
+        except Exception as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        self.saved = False
+        return self
+
+    def cmd_w(self, lhs, rhs):
+        return self.cmd_write(lhs, rhs)
+
+    def cmd_write(self, lhs, rhs):
+        '''
+        syntax: write:[filename]
+        info: write any existing dataframe in csv-format out to filename/stdout
+        descr:
+          Usually the last command in a stream that loads a dataset. But can
+          also be used to store/show the dataframe in the various stages of
+          processing.
+
+          If no filename is given, the dataframe is written to stdout.
+
+          For convenience, the abbreviation w:[filename] is an alias for write:
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) != 0:
+            errors.append('no lhs-fields allowed')
+        if len(rhs) == 0:
+            fname = sys.stdout
+        elif len(rhs) == 1:
+            fname = rhs[0]
+        else:
+            errors.append('need exactly 0 or 1 rhs-field')
+        self.fatal(errors, lhs, rhs)
+
+        try:
+            self.to_csv(fname)
+            if fname is not sys.stdout:
+                log.info('wrote {!r}'.format(fname))
+                log.info('rows, columns is {}'.format(self.dfm.shape))
+
+        except Exception as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        self.saved = True
         return self
 
     def cmd_help(self, lhs, rhs):
@@ -264,27 +375,29 @@ class Commander(object):
                    logging.Formatter('%(message)s'))
 
         log.info('\n')
-        log.info('command HELP:')
-        log.info('-------------\n')
         if len(lhs):
             log.info('ignoring {}'.format(lhs))
             log.info('see help syntax')
 
         rhs = rhs if len(rhs) else [x for x in self.hlp.keys()]
         for cmd in rhs:
-            cmd = cmd if cmd.startswith('cmd_') else 'cmd_{}'.format(cmd)
-            hlp = self.hlp.get(cmd, None)
-            if hlp is None:
-                log.info('{} is missing in internal help?'.format(cmd))
+            hlp = self.hlp.get(cmd, None) or self.hlp.get('cmd_{}'.format(cmd),
+                                                          None)
+            if hlp:
+                msg = '{:.9} - {}'.format(cmd.replace('cmd_', ''),
+                                          hlp['syntax'])
+                log.info(msg)
+                log.info('-'*len(msg))
+                log.info('information: {}'.format(hlp['info']))
+                log.info('\ndescription:')
+                for line in hlp['descr'].splitlines():
+                    log.info('  {}'.format(line))
+            else:
+                log.info('{!r} not a command, available are:'.format(cmd))
+                for idx, hlp in self.hlp.items():
+                    idx = idx.replace('cmd_', '')
+                    log.info(' - {}: {}'.format(idx, hlp['info']))
                 continue
-
-            msg = '{:.9} - {}'.format(cmd[4:], hlp['syntax'])
-            log.info(msg)
-            log.info('-'*len(msg))
-            log.info('information: {}'.format(hlp['info']))
-            log.info('\ndescription:')
-            for line in hlp['descr'].splitlines():
-                log.info('  {}'.format(line))
 
             log.info('\n')
 
@@ -430,8 +543,7 @@ class Commander(object):
             errors.append('need 1+ lhs fields')
         if len(lhs) != len(rhs):
             errors.append('need same number of lhs:rhs fields')
-        for unknown in self.unknowns(rhs):
-            errors.append('field {!r} not available'.format(unknown))
+        self.check_fields(errors, rhs)
         self.fatal(errors, lhs, rhs)
 
         try:
@@ -470,8 +582,7 @@ class Commander(object):
         srcs = lhs if len(rhs) == 0 else rhs
         if len(srcs) != len(lhs):
             errors.append('num(rhs-fields) must equal num(lhs-fields)')
-        for unknown in self.unknowns(srcs):
-            errors.append('unknown source field {!r}'.format(unknown))
+        self.check_fields(errors, srcs)
         self.fatal(errors, lhs, rhs)
 
         try:
@@ -510,8 +621,7 @@ class Commander(object):
         srcs = lhs if len(rhs) == 0 else rhs
         if len(srcs) != len(lhs):
             errors.append('num(lhs-fields) must equal num(rhs-fields)')
-        for unknown in self.unknowns(srcs):
-            errors.append('unknown source field {!r}'.format(unknown))
+        self.check_fields(errors, srcs)
         self.fatal(errors, lhs, rhs)
 
         try:
@@ -549,8 +659,7 @@ class Commander(object):
         srcs = lhs if len(rhs) == 0 else rhs
         if len(srcs) != len(lhs):
             errors.append('num(lhs-fields) must equal num(rhs-fields)')
-        for unknown in self.unknowns(srcs):
-            errors.append("field '{}' not an existing column".format(unknown))
+        self.check_fields(errors, srcs)
         self.fatal(errors, lhs, rhs)
 
         try:
@@ -576,8 +685,7 @@ class Commander(object):
             errors.append('no rhs fields allowed')
         if len(lhs) < 1:
             errors.append('need 1+ lhs fields')
-        for unknown in self.unknowns(lhs):
-            errors.append("field '{}' not an existing column".format(unknown))
+        self.check_fields(errors, lhs)
         self.fatal(errors, lhs, rhs)
 
         try:
@@ -591,11 +699,11 @@ class Commander(object):
 
     def cmd_nan(self, lhs, rhs):
         '''
-        syntax: [f=]nan:s1,..
+        syntax: [fx,..=]nan:s1,..
         info: replace values s<x> with null value in dst/all fields
         descr:
-          'nan:' will replace certain string values with a np.nan value in the
-          dataframe.  Either is all columns, or just in the ones listed in the
+          'nan:' will replace listed string values with a np.nan value in the
+          dataframe.  Either in all columns, or just in the ones listed in the
           lhs-field list.  The rhs-list is a csv-list of string values to
           replace with np.nan.
 
@@ -606,8 +714,7 @@ class Commander(object):
 
         # sanity check lhs, rhs
         errors = []
-        for unknown in self.unknowns(lhs):
-            errors.append('field {!r} not available'.format(unknown))
+        self.check_fields(errors, lhs)
         self.fatal(errors, lhs, rhs)
 
         try:
@@ -660,8 +767,7 @@ class Commander(object):
             errors.append('need exactly 1 lhs field')
         dst = lhs[0]
         sep, srcs = rhs[0], rhs[1:]
-        for unknown in self.unknowns(srcs):
-            errors.append("field '{}' not an existing column".format(unknown))
+        self.check_fields(errors, srcs)
         self.fatal(errors, lhs, rhs)
 
         try:
@@ -705,8 +811,7 @@ class Commander(object):
             errors.append('need at least 1 lhs field to assign to')
         if len(rhs) != 1:
             errors.append('need exactly 1 rhs field as map source')
-        for unknown in self.unknowns(lhs + rhs):
-            errors.append("field '{}' not available".format(unknown))
+        self.check_fields(errors, lhs + rhs)
         self.fatal(errors, lhs, rhs)
 
         src = rhs[0]
@@ -754,8 +859,7 @@ class Commander(object):
             errors.append('need at least 1 field to work with')
         if len(rhs) < 1:
             errors.append('missing field or regexp')
-        for unknown in self.unknowns(rhs[:-1]):
-            errors.append("field '{}' not available".format(unknown))
+        self.check_fields(errors, rhs[:-1])
         self.fatal(errors, lhs, rhs)
 
         expression, rhs = rhs[-1], rhs[0:-1]
@@ -791,8 +895,7 @@ class Commander(object):
             if len(rhs) == 0:
                 # f1[,f2,..]~/expr/ -> rows where expr matches 1 of f1[f2,..]
 
-                for unknown in self.unknowns(lhs):
-                    errors.append('field {!r} not available'.format(unknown))
+                self.check_fields(errors, lhs)
                 self.fatal(errors, lhs, rhs)
                 log.info("- filter rows by re.search on '{}'".format(lhs))
                 n1 = len(self.dfm.index)
@@ -830,8 +933,7 @@ class Commander(object):
                 errors.append('max 1 rhs field allowed')
                 self.fatal(errors, lhs, rhs + [expression])
 
-            for unknown in self.unknowns(srcs):
-                errors.append('field {!r} not available'.format(unknown))
+            self.check_fields(errors, srcs)
             self.fatal(errors, lhs, rhs + [expression])
 
             print(self.dfm.dtypes)
@@ -865,8 +967,7 @@ class Commander(object):
             errors.append('need 1+ lhs fields')
         if len(rhs) < 1:
             errors.append('need 1+ rhs fields')
-        for unknown in self.unknowns(lhs):
-            errors.append('field {!r} not available'.format(unknown))
+        self.check_fields(errors, lhs)
         self.fatal(errors, lhs, rhs)
 
         log.info('filter rows by range {!r} on fields {!r}'.format(rhs, lhs))
@@ -894,8 +995,7 @@ class Commander(object):
             errors.append('need 1+ lhs fields')
         if len(rhs) != 2:
             errors.append('need exactly 2 rhs fields for min,max')
-        for unknown in self.unknowns(lhs):
-            errors.append('field {!r} not available'.format(unknown))
+        self.check_fields(errors, lhs)
         self.fatal(errors, lhs, rhs)
 
         log.debug('filtering rows by {!r} {} <= field <= {}'.format(lhs, *rhs))
@@ -929,8 +1029,7 @@ class Commander(object):
             errors.append('need 1+ lhs fields')
         if len(rhs) != 1:
             errors.append('need exactly 1 rhs field')
-        for unknown in self.unknowns(lhs):
-            errors.append('field {!r} not available'.format(unknown))
+        self.check_fields(errors, lhs)
         self.fatal(errors, lhs, rhs)
 
         log.debug('filtering rows by {!r} <= {}'.format(lhs, rhs[0]))
@@ -964,8 +1063,7 @@ class Commander(object):
             errors.append('need 1+ lhs fields')
         if len(rhs) != 1:
             errors.append('need exactly 1 rhs field')
-        for unknown in self.unknowns(lhs):
-            errors.append('field {!r} not available'.format(unknown))
+        self.check_fields(errors, lhs)
         self.fatal(errors, lhs, rhs)
 
         log.debug('filtering rows by {!r} >= {}'.format(lhs, rhs[0]))
@@ -1051,8 +1149,7 @@ class Commander(object):
         errors = []
         if len(lhs) != 1 or len(lhs[0]) < 1:
             errors.append('need exactly 1 lhs field')
-        for unknown in self.unknowns(rhs):
-            errors.append('{!r} field not available'.format(unknown))
+        self.check_fields(errors, rhs)
         self.fatal(errors, lhs, rhs)
 
         dst = lhs[0]
@@ -1132,8 +1229,7 @@ class Commander(object):
         tmp = ipt[ipt.keys()[0]]   # get a sample row, must be Series or dict
         for unknown in [g for g in getfields if g not in tmp.keys()]:
             errors.append('field {!r} not available in {}'.format(unknown, table))
-        if src not in self.dfm.columns:
-            errors.append('field {!r} not available in dataframe'.format(src))
+        self.check_fields(errors, [src])
         self.fatal(errors, lhs, rhs)
 
         def lookup(key):
@@ -1160,16 +1256,22 @@ class Commander(object):
 
 def main():
     'load csv and run it through the cli commands given'
-    dfm = Commander(args.i)
+    hdlr = Commander()
+
+    if len(args.cmds) == 0:
+        hdlr.run('help', [], ['dfm'])
+        return 0
+
     for org, cmd, lhs, rhs in args.cmds:
         log.info('cli {!r}'.format(org))
         try:
-            dfm.run(cmd, lhs, rhs)
+            hdlr.run(cmd, lhs, rhs)
         except CmdError as e:
             log.exception('command {} error: {}'.format(cmd, e))
             sys.exit(1)
 
-    dfm.write(args.o)
+    if not args.cmds[-1] in ['w', 'write']:
+        hdlr.run('write', [], [])
 
     return 0
 
