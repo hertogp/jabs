@@ -31,21 +31,28 @@ def write_csv(df, fname):
 def protocol_tojson(df, fname):
     'write protocols to json files'
     # store ip protocol info in json, so we dont need pandas afterwards
-    dd = df.drop_duplicates()
+    dd = df.set_index('decimal')
+    dd = dd.drop_duplicates()
     dct = dict(zip(dd.index, zip(dd['keyword'], dd['protocol'])))
-    with open('dta/ip4-protocols.json', 'w') as outfile:
+    with open(fname, 'w') as outfile:
         json.dump(dct, fp=outfile)
         print('length', len(dct))
 
 def services_tojson(df, fname):
     'write services to json files'
+    # port/protocol -> service_name
+    dd = df.copy()
+    pt = 'port_number transport_protocol'.split()
+    dd['port'] = dd[pt].apply(lambda g: '/'.join(x for x in g), axis=1)
+    dct = dict(zip(dd['port'], dd['service_name']))
+    with open(fname, 'w') as outfile:
+        json.dump(dct, fp=outfile)
 
 
 def load_protocols(url):
     'load protocol numbers from iana and prep a ip4-protocols.csv file'
     # get & prep IPv4 protocol names
     df = load_csv(url)
-    df.to_csv('dta/hmm')
     cols = 'decimal keyword protocol'.split()
     df = df[cols]
     # df = df.dropna(subset=['keyword'])
@@ -89,8 +96,6 @@ def load_protocols(url):
     df['protocol'] = np.where(df['protocol'].isnull(),
                               df['keyword'],
                               df['protocol'])
-
-    df = df.set_index('decimal')
     return df
 
 
@@ -133,9 +138,8 @@ if __name__ == '__main__':
     protocol_tojson(dfp, 'dta/ip4-protocols.json')
     print('got & stored {:5} ipv4-protocol entries'.format(len(dfp.index)))
 
-    sys.exit(0)
-
     dfs = load_services(URL_SERVICES, 'dta/ip4-services.csv')
     write_csv(dfs, 'dta/ip4-services.csv')
+    services_tojson(dfs, 'dta/ip4-services.json')
     print('got & stored {:5} ipv4-service entries'.format(len(dfs.index)))
 

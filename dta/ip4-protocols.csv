@@ -60,14 +60,14 @@ decimal,keyword,protocol
 58,ipv6-icmp,ICMP for IPv6
 59,ipv6-nonxt,No Next Header for IPv6
 60,ipv6-opts,Destination Options for IPv6
-61,<61/ip>,any host internal protocol
+61,61/ip,any host internal protocol
 62,cftp,CFTP
-63,<63/ip>,any local network
+63,63/ip,any local network
 64,sat-expak,SATNET and Backroom EXPAK
 65,kryptolan,Kryptolan
 66,rvd,MIT Remote Virtual Disk Protocol
 67,ippc,Internet Pluribus Packet Core
-68,<68/ip>,any distributed file system
+68,68/ip,any distributed file system
 69,sat-mon,SATNET Monitoring
 70,visa,VISA Protocol
 71,ipcv,Internet Packet Core Utility
@@ -98,7 +98,7 @@ decimal,keyword,protocol
 96,scc-sp,Semaphore Communications Sec. Pro.
 97,etherip,Ethernet-within-IP Encapsulation
 98,encap,Encapsulation Header
-99,<99/ip>,any private encryption scheme
+99,99/ip,any private encryption scheme
 100,gmtp,GMTP
 101,ifmp,Ipsilon Flow Management Protocol
 102,pnni,PNNI over IP
@@ -113,7 +113,7 @@ decimal,keyword,protocol
 111,ipx-in-ip,IPX in IP
 112,vrrp,Virtual Router Redundancy Protocol
 113,pgm,PGM Reliable Transport Protocol
-114,<114/ip>,any 0-hop protocol
+114,114/ip,any 0-hop protocol
 115,l2tp,Layer Two Tunneling Protocol
 116,ddx,D-II Data Exchange (DDX)
 117,iatp,Interactive Agent Transfer Protocol
@@ -123,135 +123,135 @@ decimal,keyword,protocol
 121,smp,Simple Message Protocol
 122,sm,Simple Multicast Protocol
 123,ptp,Performance Transparency Protocol
-124,isis,<isis>
-125,fire,<fire>
+124,isis,isis
+125,fire,fire
 126,crtp,Combat Radio Transport Protocol
 127,crudp,Combat Radio User Datagram
-128,sscopmce,<sscopmce>
-129,iplt,<iplt>
+128,sscopmce,sscopmce
+129,iplt,iplt
 130,sps,Secure Packet Shield
 131,pipe,Private IP Encapsulation within IP
 132,sctp,Stream Control Transmission Protocol
 133,fc,Fibre Channel
-134,rsvp-e2e-ignore,<rsvp-e2e-ignore>
-135,mobility,<mobility>
-136,udplite,<udplite>
-137,mpls-in-ip,<mpls-in-ip>
+134,rsvp-e2e-ignore,rsvp-e2e-ignore
+135,mobility,mobility
+136,udplite,udplite
+137,mpls-in-ip,mpls-in-ip
 138,manet,MANET Protocols
 139,hip,Host Identity Protocol
 140,shim6,Shim6 Protocol
 141,wesp,Wrapped Encapsulating Security Payload
 142,rohc,Robust Header Compression
-253,<253/ip>,Use for experimentation and testing
-254,<254/ip>,Use for experimentation and testing
-255,reserved,<reserved>
-143,<143/ip>,Unassigned
-144,<144/ip>,Unassigned
-145,<145/ip>,Unassigned
-146,<146/ip>,Unassigned
-147,<147/ip>,Unassigned
-148,<148/ip>,Unassigned
-149,<149/ip>,Unassigned
-150,<150/ip>,Unassigned
-151,<151/ip>,Unassigned
-152,<152/ip>,Unassigned
-153,<153/ip>,Unassigned
-154,<154/ip>,Unassigned
-155,<155/ip>,Unassigned
-156,<156/ip>,Unassigned
-157,<157/ip>,Unassigned
-158,<158/ip>,Unassigned
-159,<159/ip>,Unassigned
-160,<160/ip>,Unassigned
-161,<161/ip>,Unassigned
-162,<162/ip>,Unassigned
-163,<163/ip>,Unassigned
-164,<164/ip>,Unassigned
-165,<165/ip>,Unassigned
-166,<166/ip>,Unassigned
-167,<167/ip>,Unassigned
-168,<168/ip>,Unassigned
-169,<169/ip>,Unassigned
-170,<170/ip>,Unassigned
-171,<171/ip>,Unassigned
-172,<172/ip>,Unassigned
-173,<173/ip>,Unassigned
-174,<174/ip>,Unassigned
-175,<175/ip>,Unassigned
-176,<176/ip>,Unassigned
-177,<177/ip>,Unassigned
-178,<178/ip>,Unassigned
-179,<179/ip>,Unassigned
-180,<180/ip>,Unassigned
-181,<181/ip>,Unassigned
-182,<182/ip>,Unassigned
-183,<183/ip>,Unassigned
-184,<184/ip>,Unassigned
-185,<185/ip>,Unassigned
-186,<186/ip>,Unassigned
-187,<187/ip>,Unassigned
-188,<188/ip>,Unassigned
-189,<189/ip>,Unassigned
-190,<190/ip>,Unassigned
-191,<191/ip>,Unassigned
-192,<192/ip>,Unassigned
-193,<193/ip>,Unassigned
-194,<194/ip>,Unassigned
-195,<195/ip>,Unassigned
-196,<196/ip>,Unassigned
-197,<197/ip>,Unassigned
-198,<198/ip>,Unassigned
-199,<199/ip>,Unassigned
-200,<200/ip>,Unassigned
-201,<201/ip>,Unassigned
-202,<202/ip>,Unassigned
-203,<203/ip>,Unassigned
-204,<204/ip>,Unassigned
-205,<205/ip>,Unassigned
-206,<206/ip>,Unassigned
-207,<207/ip>,Unassigned
-208,<208/ip>,Unassigned
-209,<209/ip>,Unassigned
-210,<210/ip>,Unassigned
-211,<211/ip>,Unassigned
-212,<212/ip>,Unassigned
-213,<213/ip>,Unassigned
-214,<214/ip>,Unassigned
-215,<215/ip>,Unassigned
-216,<216/ip>,Unassigned
-217,<217/ip>,Unassigned
-218,<218/ip>,Unassigned
-219,<219/ip>,Unassigned
-220,<220/ip>,Unassigned
-221,<221/ip>,Unassigned
-222,<222/ip>,Unassigned
-223,<223/ip>,Unassigned
-224,<224/ip>,Unassigned
-225,<225/ip>,Unassigned
-226,<226/ip>,Unassigned
-227,<227/ip>,Unassigned
-228,<228/ip>,Unassigned
-229,<229/ip>,Unassigned
-230,<230/ip>,Unassigned
-231,<231/ip>,Unassigned
-232,<232/ip>,Unassigned
-233,<233/ip>,Unassigned
-234,<234/ip>,Unassigned
-235,<235/ip>,Unassigned
-236,<236/ip>,Unassigned
-237,<237/ip>,Unassigned
-238,<238/ip>,Unassigned
-239,<239/ip>,Unassigned
-240,<240/ip>,Unassigned
-241,<241/ip>,Unassigned
-242,<242/ip>,Unassigned
-243,<243/ip>,Unassigned
-244,<244/ip>,Unassigned
-245,<245/ip>,Unassigned
-246,<246/ip>,Unassigned
-247,<247/ip>,Unassigned
-248,<248/ip>,Unassigned
-249,<249/ip>,Unassigned
-250,<250/ip>,Unassigned
-251,<251/ip>,Unassigned
-252,<252/ip>,Unassigned
+253,253/ip,Use for experimentation and testing
+254,254/ip,Use for experimentation and testing
+255,reserved,reserved
+143,143/ip,Unassigned
+144,144/ip,Unassigned
+145,145/ip,Unassigned
+146,146/ip,Unassigned
+147,147/ip,Unassigned
+148,148/ip,Unassigned
+149,149/ip,Unassigned
+150,150/ip,Unassigned
+151,151/ip,Unassigned
+152,152/ip,Unassigned
+153,153/ip,Unassigned
+154,154/ip,Unassigned
+155,155/ip,Unassigned
+156,156/ip,Unassigned
+157,157/ip,Unassigned
+158,158/ip,Unassigned
+159,159/ip,Unassigned
+160,160/ip,Unassigned
+161,161/ip,Unassigned
+162,162/ip,Unassigned
+163,163/ip,Unassigned
+164,164/ip,Unassigned
+165,165/ip,Unassigned
+166,166/ip,Unassigned
+167,167/ip,Unassigned
+168,168/ip,Unassigned
+169,169/ip,Unassigned
+170,170/ip,Unassigned
+171,171/ip,Unassigned
+172,172/ip,Unassigned
+173,173/ip,Unassigned
+174,174/ip,Unassigned
+175,175/ip,Unassigned
+176,176/ip,Unassigned
+177,177/ip,Unassigned
+178,178/ip,Unassigned
+179,179/ip,Unassigned
+180,180/ip,Unassigned
+181,181/ip,Unassigned
+182,182/ip,Unassigned
+183,183/ip,Unassigned
+184,184/ip,Unassigned
+185,185/ip,Unassigned
+186,186/ip,Unassigned
+187,187/ip,Unassigned
+188,188/ip,Unassigned
+189,189/ip,Unassigned
+190,190/ip,Unassigned
+191,191/ip,Unassigned
+192,192/ip,Unassigned
+193,193/ip,Unassigned
+194,194/ip,Unassigned
+195,195/ip,Unassigned
+196,196/ip,Unassigned
+197,197/ip,Unassigned
+198,198/ip,Unassigned
+199,199/ip,Unassigned
+200,200/ip,Unassigned
+201,201/ip,Unassigned
+202,202/ip,Unassigned
+203,203/ip,Unassigned
+204,204/ip,Unassigned
+205,205/ip,Unassigned
+206,206/ip,Unassigned
+207,207/ip,Unassigned
+208,208/ip,Unassigned
+209,209/ip,Unassigned
+210,210/ip,Unassigned
+211,211/ip,Unassigned
+212,212/ip,Unassigned
+213,213/ip,Unassigned
+214,214/ip,Unassigned
+215,215/ip,Unassigned
+216,216/ip,Unassigned
+217,217/ip,Unassigned
+218,218/ip,Unassigned
+219,219/ip,Unassigned
+220,220/ip,Unassigned
+221,221/ip,Unassigned
+222,222/ip,Unassigned
+223,223/ip,Unassigned
+224,224/ip,Unassigned
+225,225/ip,Unassigned
+226,226/ip,Unassigned
+227,227/ip,Unassigned
+228,228/ip,Unassigned
+229,229/ip,Unassigned
+230,230/ip,Unassigned
+231,231/ip,Unassigned
+232,232/ip,Unassigned
+233,233/ip,Unassigned
+234,234/ip,Unassigned
+235,235/ip,Unassigned
+236,236/ip,Unassigned
+237,237/ip,Unassigned
+238,238/ip,Unassigned
+239,239/ip,Unassigned
+240,240/ip,Unassigned
+241,241/ip,Unassigned
+242,242/ip,Unassigned
+243,243/ip,Unassigned
+244,244/ip,Unassigned
+245,245/ip,Unassigned
+246,246/ip,Unassigned
+247,247/ip,Unassigned
+248,248/ip,Unassigned
+249,249/ip,Unassigned
+250,250/ip,Unassigned
+251,251/ip,Unassigned
+252,252/ip,Unassigned
