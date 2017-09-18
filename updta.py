@@ -52,9 +52,12 @@ def services_tojson(df, fname):
 def load_protocols(url):
     'load protocol numbers from iana and prep a ip4-protocols.csv file'
     # get & prep IPv4 protocol names
-    df = load_csv(url)
-    cols = 'decimal keyword protocol'.split()
-    df = df[cols]
+    try:
+        df = load_csv(url)
+        cols = 'decimal keyword protocol'.split()
+        df = df[cols]
+    except KeyError:
+        raise Exception('Unexpected/different data, wrong url {}?'.format(url))
     # df = df.dropna(subset=['keyword'])
 
     # clean up values
