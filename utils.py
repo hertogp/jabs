@@ -190,7 +190,10 @@ def cmd_error(df, lhs, rhs, errors):
 def pfx_proper(pfxstr):
     'turn a single pfx-string into a well-formatted pfx'
     try:
-        # support shorthands like 10/8, and use a /32 by default
+        # allow for shorthands like 10/8, use a /32 by default
+        if pfxstr.count('.') > 3:
+            raise ValueError('{!r} invalid prefix string'.format(pfxstr))
+
         if '/' not in pfxstr:
             prefix = '{}/32'.format(pfxstr)
         elif pfxstr.endswith('/'):
@@ -204,6 +207,138 @@ def pfx_proper(pfxstr):
         raise ValueError('cannot turn {!r} into a valid prefix'.format(pfxstr))
 
     return '{}/{}'.format(addr, msk)
+
+#-- new pfx mangling
+#         addr   /plen
+#  pfx    a.b.c.d/e     <-- addr/plen as strings
+#         | | | | |
+#  pil   [a,b,c,d,e]    <-- prefix integer list
+#         ------- -
+#            ^    ^
+#            |    |
+#            v    v
+#  ival   (uint, numh)  <-- ival_netw, ival_bcast
+#
+#  pstr   port1-port2/proto
+#
+#
+#-- 1. unit conversions, these may raise ValueError
+def uint2intq(uint):
+    'turn uint into the four dotted quad ints'
+    if 0 <= uint < 2**32:
+        d1 = (uint // 16777216)  & 0x000000FF
+        d2 = (uint // 65536) & 0x000000FF
+        d3 = (uint // 256) & 0x000000FF
+        d4 = uint & 0x000000FF
+        return [d1, d2, d3, d4]
+    raise ValueError('uint ({}) invalid for ipv4'.format(uint))
+
+def uint2dotq(uint):
+    'turn uint for ipv4 address into dotted quad decimal'
+    return '{}.{}.{}.{}'.format(*uint2intq(uint))
+
+def dotq2uint(dotq):
+    'dotted quad decimal to uint, allow shorthands like 1.1'
+    if dotq.count('.') > 3:
+        raise ValueError('{!r} is invalid dotq'.format(dotq))
+
+    try:
+        x = list(map(int, dotq.split('.')))
+        for d in x:
+            if 0 < d  or d > 255:
+                raise ValueError('{!r} invalid dotquad'.format(dotq))
+        if len(x) > 4:
+            raise ValueError('{!r} invalid dotquad'.format(dotq))
+        elif len(x) < 4:
+            x = (x + [0,0,0,0])[0:4]
+        return x[0] * 16777216 + x[1] * 65536 + x[2] * 256 + x[3]
+
+    except Exception:
+        raise ValueError('{!r} invalid dotquad'.format(dotq))
+
+def len2mask(pfxlen):
+    if 0 <= pfxlen <= 32:
+        return 2**32 - 2**(32 - pfxlen)
+    raise ValueError('invalid prefix length {}'.format(pfxlen))
+
+def mask2len(uint):
+    # assume proper uint consecutive 1's starting on the left
+    if 0 <= uint < 2**32:
+        return 32 - int(math.log(2**32 - uint)/math.log(2))
+    raise ValueError('{!r} invalid uint for ipv4'.format(uint))
+
+def len2numh(pfxlen):
+    if 0 <= pfxlen <= 32:
+        return 2**(32 - pfxlen)
+    raise ValueError('invalid prefix length {}'.format(pfxlen))
+
+def numh2len(numh):
+    if 0 <= numh <= 2**32:
+        return 32 - int(math.log(numh)/math.log(2))
+    raise ValueError('invalid numhosts {}'.format(numh))
+
+def numh2mask(numh):
+    'convert number of hosts to network mask'
+    # 256 to uint for 255.255.255.0'
+    if ((numh & (numh - 1)) == 0) and numh > 0:  # ensure power of two
+        return 2**32 - numh
+    raise ValueError('numhosts ({}) is not a power of two'.format(numh))
+
+def mask2numh(uint):
+    'convert uint mask to number of hosts'
+    # uint for 2255.255.255.0 -> 256
+    numh = 2**32 - uint
+    if ((numh & (numh - 1)) == 0) and numh > 0:  # ensure power of two
+        return numh
+    raise ValueError('uint ({}) is an invalid mask'.format(uint))
+
+
+def len2imask(pfxlen):
+    if 0 <= pfxlen <= 32:
+        return 2**(32 - pfxlen) - 1
+    raise ValueError('invalid prefix length {}'.format(pfxlen))
+
+
+def imask2len(uint):
+    # assume proper uint with consecutive 1's starting on the right
+    if 0<= uint < 2**32:
+        return 32 - int(math.log(1 + uint)/math.log(2))
+    raise ValueError('{!r} invalid uint for ipv4'.format(uint))
+
+#--2. ival conversions
+def pfx2ival(pfxstr):
+    parts = pfxstr.split('/', 1)
+    plen = 32 if len(parts) == 1 else int(parts[1])
+    if 0 > plen > 32:
+        raise ValueError('{!r} invalid prefix string'.format(pfxstr))
+    numh = 1 if len(parts) == 1 else 2**(32 - plen)
+    return (dotq2uint(parts[0]), numh)
+
+def ival_network(ival):
+    'mask down to network address'
+    pass
+
+def ival2pfx(ival):
+    '(addr, numhosts) -> addr/len, donot mask to network address'
+    uint, numh = ival
+    plen = 32 - int(math.log(numh) / math.log(2))
+    return '{}/{}'.format(uint2dotq(uint), plen)
+
+def ival2pfx_netw(ival):
+    '(addr, numhosts) -> network_addr/len'
+    uint, numh = ival
+    plen = 32 - int(math.log(numh) / math.log(2))
+    mask = len2mask(plen)
+    return '{}/{}'.format(uint2dotq(uint & mask), plen)
+
+def ival2pfx_bcast(ival):
+    '(addr, numhosts) -> bcast_addr/len'
+    uint, numh = ival
+    plen = 32 - int(math.log(numh) / math.log(2))
+    imask = len2imask(plen)
+    return '{}/{}'.format(uint2dotq(uint | imask), plen)
+
+#-- old pfx mangling
 
 def pfx_network(pfxstr):
     'turn a single pfx-string into a well-formatted network-pfx'
@@ -227,9 +362,16 @@ def pfx_hosts(pfxstr):
     'iterator across valid ip nrs in range of pfxstr, start with host-pfx'
     uint, numh = pfx_toival(pfxstr)
     umax, numh = pfx_toivalbcast(pfxstr)
-    print('hosts range', uint, umax, '->', list(range(uint, umax+1)))
     for num in range(uint, umax+1):
         yield pfx_fromival((num, 1))
+
+def pfx_range(pfxstr):
+    'given a prefix, what is the range, 1.1.1.1/24 -> 1.1.1.1 - 255'
+    uint, numh = pfx_toivalnetwork(pfxstr)
+    mind = uint2dotq(uint).split('.')
+    maxd = uint2dotq(uint + numh - 1).split('.')
+    difd = filter(None, ['' if x==y else y for (x,y) in zip(mind, maxd)])
+    return '{} - {}'.format('.'.join(mind), '.'.join(difd))
 
 def pfx_fromival(ival):
     'turn a (host-uint, num_hosts)-tuple into a pfx'
@@ -242,44 +384,31 @@ def pfx_fromival(ival):
     d4 = uint & 0x000000FF
     return '{}.{}.{}.{}/{}'.format(d1,d2,d3,d4,plen)
 
-def pfxs_fromival(ival):
-    'turn a (host-uint, num_hosts)-tuple into a list of net-pfx-s'
-    # ival[1] is number of hosts and must always be a power of 2 (!)
-    # *-----:-----| -> start == network address -> result = 1 net pfx
-    # |-----:-----* -> start == bcast address -> result = 1 host pfx
-    # |---*-:-----| -> start inside left half -> result = 1 net pfx + recurse
-    # |-----:--*--| -> start inside right half -> result = recurse
-
+def pfxnet_fromival(ival):
+    'turn a (host-uint, num_hosts)-tuple into a network pfx'
+    # donot mask host-uint to this network address
     uint, numh = ival
-    half = int(numh//2)
     plen = 32 - int(math.log(numh) / math.log(2))
     mask = 2**32 - numh
-    imsk = (2**32 - 1) ^ mask
-    nint = uint & mask           # this network
-    bint = uint | imsk           # broadcast
-    mint = nint + half           # start of upper half
+    uint = uint & mask
+    d1 = (uint // 16777216)  & 0x000000FF
+    d2 = (uint // 65536) & 0x000000FF
+    d3 = (uint // 256) & 0x000000FF
+    d4 = uint & 0x000000FF
+    return '{}.{}.{}.{}/{}'.format(d1,d2,d3,d4,plen)
 
-    print('pfx', pfx_fromival(ival))
-    print('- network', pfx_fromival((nint, numh)))
-    print('- bcast  ', pfx_fromival((bint, numh)))
-    print('- upperh ', pfx_fromival((mint, numh)))
-
-    rv = []
-    if plen == 32:                             # single address
-        rv.append(pfx_fromival(ival))
-    elif uint == nint:                         # aligned on start of range
-        rv.append(pfx_fromival(ival))
-    elif uint == bint:                         # aligned on bcast address
-        rv.append(pfx_fromival((uint, 1)))
-    elif uint == mint:                         # aligned on start of upper half
-        rv.append(pfx_fromival((uint, half)))
-    elif uint < mint:                          # inside left half
-        rv.append(pfx_fromival((mint, half)))  # - add upper half
-        rv.extend(pfxs_fromival((uint, half))) # - recurse
-    else:                                      # inside right half
-        rv.extend(pfxs_fromival((uint, half))) # - recurse
-
-    return rv
+def pfxbcast_fromival(ival):
+    'turn a (host-uint, num_hosts)-tuple into a broadcast pfx'
+    # donot mask host-uint to this network address
+    uint, numh = ival
+    invmask = (2**32 -1) ^ (2**32 - numh)
+    uint = uint | invmask
+    plen = 32 - int(math.log(numh) / math.log(2))
+    d1 = (uint // 16777216)  & 0x000000FF
+    d2 = (uint // 65536) & 0x000000FF
+    d3 = (uint // 256) & 0x000000FF
+    d4 = uint & 0x000000FF
+    return '{}.{}.{}.{}/{}'.format(d1,d2,d3,d4,plen)
 
 
 
@@ -306,50 +435,54 @@ def pfx_toivalbcast(pfx):
     invmask = (2**32 -1) ^ (2**32 - numh)
     return (uint | invmask, numh)
 
-
 def pfx_summary(pfxlst):
     'summarize a list of host-prefixes into minimum set of network-prefixes'
     # blatant disregard for ipv6
     heap = []
     for pfx in pfxlst:
-        heap.append(pfx_toival(pfx))
+        heap.append(pfx_toivalnetwork(pfx))  # note masking for network address
 
     # reverse since this sorts first on uint, then on length in ascending order
-    heap = list(reversed(sorted(heap)))
+    # heap = list(reversed(sorted(heap)))
 
     # reduce heap to minimum amount of ranges/intervals
-    rv = []
-    while len(heap):
-        x = heap.pop()
-        y = heap.pop() if len(heap) else None
-        if y:
-            x, y = ival_combine(x, y)  # y is None when x combines x+y
-            if y:
-                heap.append(y)  # push back for later combine attempt
-            else:
-                heap.append(x)  # combined range back on heap
-                continue        # and start over
+    return [pfx_fromival(x) for x in ival_summary(heap)]
 
-        y = rv.pop() if len(rv) else None
-        if y:
-            x, y = ival_combine(x, y) # y is None when x combines x+y
-            if y:
-                rv.append(y)  # could not combine, both goto rv
-                rv.append(x)  # make sure to keep rv ordering intact
-            else:
-                heap.append(x)  # combined range back on heap
-
-        else:
-            rv.append(x)
-
-    # intervals need to be aligned on power of 2 intervals, so a given
-    # single interval might yield multiple network prefixes
-    # (s, l) -> 
-    #
-    return [pfx_fromival(x) for x in rv if x]
+#    rv = [] while len(heap):
+#        x = heap.pop()
+#        y = heap.pop() if len(heap) else None
+#        if y:
+#            x, y = ival_combine(x, y)  # y is None when x combines x+y
+#            if y:
+#                heap.append(y)  # push back for later combine attempt
+#            else:
+#                heap.append(x)  # combined range back on heap
+#                continue        # and start over
+#
+#        y = rv.pop() if len(rv) else None
+#        if y:
+#            x, y = ival_combine(x, y) # y is None when x combines x+y
+#            if y:
+#                rv.append(y)  # could not combine, both goto rv
+#                rv.append(x)  # make sure to keep rv ordering intact
+#            else:
+#                heap.append(x)  # combined range back on heap
+#
+#        else:
+#            rv.append(x)
+#
+#    # intervals need to be aligned on power of 2 intervals, so a given
+#    # single interval might yield multiple network prefixes
+#    # (s, l) -> ...
+#    #
+#    return [pfx_fromival(x) for x in rv if x]
 
 def ival_combine(x, y):
-    'return (combined, None) if possible, else (x, y)'
+    'combine two intervals as (combined, None) if possible, else (x, y)'
+    # intervals can be combined iff:
+    # - one lies inside the other, or
+    # - overlap each other exactly, or
+    # - are adjacent and of equal length
     dbg = False
     if y is None:
         return (x, y)
@@ -381,6 +514,90 @@ def ival_combine(x, y):
     if dbg: print('no joy')
     return (x, y)  # no joy
 
+
+def ival_summary(ivals):
+    'summarize a list intervals (uint, numh) into minimum set of intervals'
+    # donot use masking
+
+    # reverse since this sorts first on uint, then on length in ascending order
+    heap = list(reversed(sorted(ivals)))
+
+    # reduce heap to minimum amount of intervals
+    rv = []
+    while len(heap):
+        x = heap.pop()
+        y = heap.pop() if len(heap) else None
+        if y:
+            x, y = ival_combine(x, y)  # y is None when x combines x+y
+            if y:
+                heap.append(y)  # push back for later combine attempt
+            else:
+                heap.append(x)  # combined range back on heap
+                continue        # and start over
+
+        y = rv.pop() if len(rv) else None
+        if y:
+            x, y = ival_combine(x, y) # y is None when x combines x+y
+            if y:
+                rv.append(y)  # could not combine, both goto rv
+                rv.append(x)  # make sure to keep rv ordering intact
+            else:
+                heap.append(x)  # combined range back on heap
+
+        else:
+            rv.append(x)
+
+    # intervals need to be aligned on power of 2 intervals, so a given
+    # single interval might yield multiple network prefixes
+    # (s, l) -> ...
+    #
+    return rv
+
+
+def ival_aspfxs(ival):
+    'turn a (host-uint, num_hosts)-tuple into a list of net-pfx-s'
+    # The interval gives that first valid address and the number of following
+    # addresses that should be matched by the list of ival_pfx's returned.
+    # - so no mask can/may be applied to the address to get this-network
+    # - 1.1.1.128/24 => valid ip's are 1.1.1.128 - .255 = [1.1.1.128/25]
+    # - 1.1.1.127/24 => valid are 1.1.1.127 -.255 = [1.1.1.127/32, 1.1.1.128/25]
+    # ival[1] is number of hosts and must always be a power of 2 (!)
+    # *-----:-----| -> start == network address -> result = 1 net pfx
+    # |-----:-----* -> start == bcast address -> result = 1 host pfx
+    # |---*-:-----| -> start inside left half -> result = 1 net pfx + recurse
+    # |-----:--*--| -> start inside right half -> result = recurse
+    print('pfxs for:', pfx_fromival(ival))
+    uint, numh = ival
+    half = int(numh//2)
+    plen = 32 - int(math.log(numh) / math.log(2))
+    mask = 2**32 - numh
+    imsk = (2**32 - 1) ^ mask
+    nint = uint & mask           # this network
+    bint = uint | imsk           # broadcast
+    mint = nint + half           # start of upper half
+
+    rv = []
+    if plen == 32:                             # single address
+        return [pfx_fromival(ival)]
+    elif uint == nint:                         # aligned on start of range
+        return [pfx_fromival(ival)]
+    elif uint == bint:                         # aligned on bcast address
+        return [pfx_fromival((uint, 1))]
+    elif uint == mint:                         # aligned on start of upper half
+        return [pfx_fromival((uint, half))]
+    elif uint < mint:                          # inside left half
+        return [pfx_fromival((mint, half))] + ival2pfxs((uint, half))
+        # rv.append(pfx_fromival((mint, half)))  # - add upper half
+        # rv.extend(ival2pfxs((uint, half))) # - recurse
+    elif uint > mint:                          # inside right half
+        return ival2pfxs((uint, half))     # - recurse
+    else:
+        raise ValueError('{!} invalid ival for pfx-list'.format(ival))
+
+    return rv
+
+
+
 def pp_fromstr(ppstr):
     'turn port/proto into 0.proto.port1.port2/32 prefix'
     pass
@@ -405,23 +622,29 @@ def ports_fromppfx(ppfx):
 
 def ports_toppfx(portstr):
     'a-b/c -> shortest list of [ppfx-s] possible'
+    # 80/tcp -> 80, 6 -> 0.6.0.80/32 -> uint
     if '/' not in portstr:
         raise ValueError('{} is missing protocol'.format(portstr))
     x = re.split('-|/', portstr)
+
     if not len(x) in (2,3):
-        raise ValueError('{} is malformed'.format(portstr))
-    start, stop, proto = (x[0], x[1], x[2]) if len(x) == 3 else (x[0], x[0], x[1])
-    start = int(start)
-    stop = int(stop)
-    rv = []
-    for y in range(start, stop+1):
-        p1 = (y // 256) & 0xff
-        p2 = y & 0xff
-        rv.append('0.{}.{}.{}/32'.format(proto, p1, p2))
+        raise ValueError('{!r} is malformed'.format(portstr))
+    if x[-1].lower() not in self._name_tonum:
+        raise ValueError('{!r} has unknown protocol'.format(portstr))
+
+    try:
+        proto = self._name_tonum[x[1].lower()]
+        start = int(x[0])
+        stop = int(x[1]) if len(x) == 3 else start
+        rv = []
+        for y in range(start, stop+1):
+            p1 = (y // 256) & 0xff
+            p2 = y & 0xff
+            rv.append('0.{}.{}.{}/32'.format(proto, p1, p2))
+    except ValueError as e:
+        raise ValueError('{!r} not valid portstring'.format(portstr))
 
     return rv
-# 80/tcp -> 80, 6 -> 0.6.0.80/32
-#
 
 def pfx_summary_org(pfxlst):
     'remove redundancy from a list of (im)properly formatted pfx-strings'
@@ -472,9 +695,8 @@ def str2list(a_string):
     except (TypeError, ValueError):
         raise ValueError('{!r} doesnt look like a string'.format(a_string))
 
+
 if __name__ == '__main__':
-    # seems to be comined to 1.1.1.248/30?
-    pfx = '1.1.1.128/24'
-    print(pfx, 'ival', pfx_toival(pfx), 'ivalnet', pfx_toivalnetwork(pfx),
-          'ivalbcast', pfx_toivalbcast(pfx), 'hosts', list(pfx_hosts(pfx)))
-    print(pfx, pfxs_fromival(pfx_toival(pfx)))
+    pfx = '1.1.1.249/31'
+    print('pfx', pfx, '-> netpfxs', ival_aspfxs(pfx_toival(pfx)))
+    print('pfx', pfx, '-> summ', pfx_summary([pfx]))

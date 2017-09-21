@@ -1,10 +1,57 @@
 #!/usr/bin/env python3
 
 '''
-syntax: dfm command, ...
-info: read, manipulate and write datasets
+syntax: dfm command ...
+info: read, manipulate and write datasets using pandas
 descr:
-    dataframe manipulations
+    Read a dataset from disk, apply various commands and write results to stdout
+    or a given filename.
+
+    dfm r:logs.csv svpn=ipl:vpn_nets,src_ip w:logs-named.csv
+
+    dfm executes the commands left-to-right and reads the logs.csv file into a
+    pandas dataframe, then it applies an iplookup on src_ip in a network table
+    named vpn_nets[.csv] and assigns any name found to a new column svpn.  This
+    basically adds a column to the logs, listing the vpn's the src_ip address
+    belongs to.
+
+    dfm help:         - will list all available commands
+    dfm help:cmd,..   - lists help on the commands listed.
+
+    All commands more or less follow the convention:
+
+    f1,..=func:a1,...
+
+    The columns to create/modify on the left-hand-side, and the command
+    arguments on the right-hand-side.  Each command checks its arguments and
+    interprets them in a way that hopefully makes sense for that particular
+    command.  For some commands lhs/rhs fields are optional or forbidden.
+
+    Some further examples are:
+
+    dfm r:people.csv email~/\.eu$/      - lists people w/ eu emails
+    dfm r:people.csv name=join:-,first,last - new column with first-last names
+    dfm r:people.csv name,phone         - lists only the name and phone columns
+    dfm r:people.csv age=inrange:10,19  - list the teens
+    dfm r:people.csv age=gte:20         - 20 years or older
+    dfm r:people.csv eyes=in:blue,green - people with blue or green eyes
+    dfm r:people.csv name,phone w:cell.csv - create cell.csv w/ only 2 fields
+    dfm help:                           - lists all available commands
+    dfm help:nan,ipl                    - list help for two commands
+
+    dfm makes it possible to:
+    - add columns to csv-data using lookups (e.g using longest prefix matches)
+    - cut columns from the csv-data
+    - count rows using a groupby some columns
+    - sum an existing count using a groupby some columns
+    - filter rows using a regular expression
+    - filter rows using lte,gte,inrange numeric expressions
+    - filter rows using a simple value list
+    - forward/backward fill columns using known good values
+
+    All of which can be done using other tools, but using those usually required
+    privileges outside my reach or a lot of repetitive manual labor.
+
 '''
 
 # TODO
@@ -94,20 +141,15 @@ def parse_args(argv):
          help='show informational messages')
     padd('-d', '--debug', action='store_const', dest='log_level',
          const=logging.DEBUG, help='show debug messages')
-    padd('-o', required=False, type=str, default='',
-         help='output filename, if not given prints to stdout')
-    padd('-i', required=False, type=str, default='',
-         help='csv input filename to process')
     padd('-V', '--Version', action='version',
          version='{} {}'.format(argv[0], __version__))
-    padd('commands', nargs='*')
+    padd('command', nargs='*')
 
     # parse & sanitize the arguments
     arg = p.parse_args(argv[1:])
-    arg.o = arg.o or sys.stdout
     arg.prog = argv[0]
     arg.cmds = []
-    for cmd in arg.commands:
+    for cmd in arg.command:
         arg.cmds.append([cmd, *cmd_parser(cmd_tokens(cmd))])
 
     return arg
@@ -270,7 +312,7 @@ class Commander(object):
         return self
 
     def run(self, cmd, lhs, rhs):
-        log.info('running cmd {}={}:{}'.format(lhs, cmd, rhs))
+        log.debug('running cmd {}={}:{}'.format(lhs, cmd, rhs))
         func = getattr(self, 'cmd_{}'.format(cmd.lower()), None)
         if func:
             return func(lhs, rhs)
@@ -280,16 +322,20 @@ class Commander(object):
         return self
 
     def cmd_r(self, lhs, rhs):
+        '''
+        syntax: r:f,...
+        info: r is short for read, reads 1+csv-file(s)
+        descr:
+           see read
+        '''
         return self.cmd_read(lhs, rhs)
 
-    def cmd_read(self, lhs, rhs):
+    def org_cmd_read(self, lhs, rhs):
         '''
         syntax: read:filename
         info: discard any existing dataframe and load new one from csv-file
         descr:
           Usually the first command in a stream that loads a dataset.
-
-          For convenience, the abbreviation r:filename is an alias for read:
         '''
         # sanity check lhs, rhs
         errors = []
@@ -320,7 +366,65 @@ class Commander(object):
         self.saved = False
         return self
 
+    def cmd_read(self, lhs, rhs):
+        '''
+        syntax: read:f,..
+        info: discard any existing dataframe and load new one from 1+ csv-files
+        descr:
+          Loads data from csv-file(s), rhs-fields may list files or
+          glob-patterns.
+
+          rmany:a.csv,b*.csv  - read a.csv and all b-csv's into 1 dataframe.
+          rmany:a,b*          - same thing, .csv extension is tested for as well
+
+          Note that strange things may happen if the csv-files have different
+          column names.
+
+          For convenience, the abbreviation r: is an alias for rmany.
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) != 0:
+            errors.append('no lhs-fields allowed')
+        if len(rhs) < 1:
+            errors.append('need 1+ rhs-field')
+
+        import glob
+        fnames = []
+        for fname in rhs:
+            flist = glob.glob(fname) or glob.glob('{}.csv'.format(fname))
+            if len(flist) == 0:
+                errors.append('cant read {}'.format(fname))
+            else:
+                fnames.extend(flist)
+        self.fatal(errors, lhs, rhs)
+
+        try:
+            self.dfm = pd.DataFrame()
+            dflist = []
+            for fname in fnames:
+                df = self.load_csv(fname)
+                log.info('read {}'.format(fname))
+                log.info('rows, columns is {}'.format(df.shape))
+                log.info('column names: {}'.format(df.columns.values))
+                dflist.append(df)
+            self.dfm = pd.concat(dflist)
+            log.info('rows, columns is {}'.format(self.dfm.shape))
+            log.info('column names: {}'.format(self.dfm.columns.values))
+
+        except Exception as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        self.saved = False
+        return self
+
     def cmd_w(self, lhs, rhs):
+        '''
+        syntax: w:[filename]
+        info: w is short for write
+        descr:
+          See write
+        '''
         return self.cmd_write(lhs, rhs)
 
     def cmd_write(self, lhs, rhs):
@@ -425,15 +529,11 @@ class Commander(object):
         log.info( '\nflags:')
         log.info( ' log level (-v or -d) {}'.format(
             logging.getLevelName(args.log_level)))
-        log.info( ' input file      (-i) {}'.format(args.i))
-        log.info( ' output file     (-o) {}'.format(args.o))
 
-        if len(args.commands):
+        if len(args.command):
             log.info( '\ncli command stream:')
-            maxl = max(len(c) for c in args.commands)
+            maxl = max(len(c) for c in args.command)
             for idx, (org, cmd, lhs, rhs) in enumerate(args.cmds):
-            # for idx, txt in enumerate(args.commands):
-                # org, cmd, lhs, rhs = args.cmds[idx]
                 log.info(' cmd {:02} '.format(idx) +
                          '{:{w}}  => {}={}:{}) '.format(org, lhs, cmd, rhs,
                                                         w=maxl))
@@ -1263,14 +1363,21 @@ def main():
         return 0
 
     for org, cmd, lhs, rhs in args.cmds:
-        log.info('cli {!r}'.format(org))
+        log.debug('cli {!r}'.format(org))
         try:
             hdlr.run(cmd, lhs, rhs)
+        except AttributeError as e:
+            if hdlr.dfm is None:
+                log.warn('Oops, forgot to read in a dataset?')
+            else:
+                log.warn('Oops, runtime error {}'.format(e))
+            sys.exit(1)
         except CmdError as e:
             log.exception('command {} error: {}'.format(cmd, e))
             sys.exit(1)
 
-    if not args.cmds[-1] in ['w', 'write']:
+    # if last command is not a write, write to stdout
+    if not args.cmds[-1][1] in ['w', 'write']:
         hdlr.run('write', [], [])
 
     return 0

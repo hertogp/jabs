@@ -9,12 +9,13 @@ import os
 import sys
 import re
 import math
+import json
 
 import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from util import *
+import utils as ut
 
 #-- helpers
 # def load_csv(fname):
@@ -37,168 +38,147 @@ class IpfError(Exception):
 
 class Ip4Proto(object):
     'helper to translate strings to port,protocol nrs'
-    # wraps:
-    # - dta/service-names-port-numbers.csv and
-    # - dta/service-names-port-numbers.csv
-    def __init__(self):
+    ip4_proto_json = 'dta/ip4-protocols.json'
+    ip4_services_json = 'dta/ip4-services.json'
 
-        # IPv4 IP Protocol numbers
-        self._n2p = {}  # number -> protocol
-        self._n2d = {}  # number -> description
-        self._p2n = {}  # protocol -> number
-
-        # IPv4 Services
-        self._s2pp = {}  # name -> [(portnr, protocolnr), ..]
-        self._pp2s = {}  # (port,protocol) -> keyword
-
-        self.lightweight()
-
-    def lightweight(self):
-        'fill the dicts with some basic information'
-        for n,p,d in [( 1, 'icmp', 'internet control message'),
-                      ( 6, 'tcp', 'transmission control '),
-                      ( 17,'udp', 'user datagram '),
-                      ( 27,'rdp', 'reliable data protocol '),
-                      ( 46,'rsvp', 'reservation protocol '),
-                      ( 47,'gre', 'generic routing encapsulation '),
-                      ( 50,'esp', 'encap security payload'),
-                      ( 51,'ah', 'authentication header'),
-                      ( 56,'tlsp', 'transport layer security protocol '),
-                      ( 58,'ipv6-icmp', 'icmp for ipv6'),
-                      ( 88,'eigrp', 'enhanced igrp'),
-                      ( 89,'ospfigp', 'ospfigp '),
-                      ( 92,'mtp', 'multicast transport protocol '),
-                      ( 94,'ipip', 'ip-within-ip encapsulation protocol '),
-                      ( 98,'encap', 'encapsulation header '),
-                      ( 112,'vrrp', 'virtual router redundancy protocol '),
-                      ( 115,'l2tp', 'layer two tunneling protocol '),
-                      ( 132,'sctp', 'stream control transmission protocol '),
-                      ]:
-            self._n2p[n] = p
-            self._n2d[n] = d
-            self._p2n[p] = n
-
-        for s, p in [('https', [(443, 6), (443, 17)]),
-                     ('http', [(80, 6), (80, 17)]),
-                     ('snmp', [(161, 17)]),
-                     ('smtp', [(25, 6)]),
-                     ('dns', [(53, 6), (53, 17)]),
-                     ]:
-            self._s2pp[s] = p
-            for pp in p:
-                self._pp2s[pp] = s
+    def __init__(self, proto_json=None, services_json=None):
+        self._num_toname = {}       # e.g. 6 -> 'tcp'
+        self._num_todesc = {}       # e.g. 6 -> 'Transmission Control'
+        self._name_tonum = {}       # e.e. 'tcp' -> 6
+        self._service_toports = {}  # e.g https -> ['443/tcp', '443/udp']
+        self._port_toservice = {}   # 'port/proto'     -> ip4-service-name
 
 
-    def load_files(self, fproto=None, fservice=None):
+        if proto_json:
+            self.load_protos(proto_json)
+        if services_json:
+            self.load_services(services_json)
 
-        fproto = fproto if fproto else 'dta/ip4-protocols.csv'
-        fservice = fservice if fservice else 'dta/ip4-services.csv'
-        self.load_protos(fproto)
-        self.load_services(fservice)
-
-        return self
-
-    def load_protos(self, fname):
-        'load ipv4r-protocol nrs from file created by updta.py'
-        # clear all dicts
-        self._n2p.clear()    # num -> proto name
-        self._n2d.clear()    # num -> description
-        self._p2n.clear()    # proto name -> num
+    def load_protos(self, filename):
+        'read json encoded ip4-protocol information'
+        # {'6': ['tcp', 'Transmission Control'], ..}
 
         try:
-            df = load_csv(fname)
+            with open(filename, 'r') as fh:
+                dct = json.load(fh)
         except (OSError, IOError) as e:
-            raise IpfError('err loading info: {}: {}'.format(fname, repr(e)))
-            sys.exit(1)
-        except Exception as e:
-            raise IpfError('runtime error: {}'.format(e))
+            raise IOError('Cannot read {!r}: {!r}'.format(filename, e))
 
-        # assume properly formatted csv-file
-        df = df.set_index('decimal')
-        self._n2p = df['keyword'].to_dict()
-        self._n2d = df['protocol'].to_dict()
-        self._p2n = dict((v, k) for k, v in self._n2p.items())
+        for num, (name, descr) in dct.items():
+            num = int(num)
+
+        self._num_toname = dict((int(k), v[0].lower()) for k, v in dct.items())
+        self._num_todesc = dict((int(k), v[1]) for k, v in dct.items())
+        self._name_tonum = dict((v[0].lower(), int(k)) for k, v in dct.items())
 
         return self
 
-    def load_services(self, fname):
+    def load_services(self, filename):
         'load ipv4-services from file created by updta.py'
-        self._s2pp.clear()
-        self._pp2s.clear()
+        # {"995/udp": "pop3s", ..}
 
         try:
-            df = load_csv(fname)
+            with open(filename, 'r') as fh:
+                dct = json.load(fh)
         except (OSError, IOError) as e:
-            raise IpfError('err loading info: {}: {}'.format(fname, repr(e)))
-            sys.exit(1)
-        except Exception as e:
-            raise IpfError('runtime error: {}'.format(e))
-            sys.exit(1)
+            raise IOError('cannot read {!r}: {!r}'.format(filename, e))
 
-        # assume properly formatted csv-file
-        df.columns = ['port', 'proto', 'service']
-        df['proto'] = df['proto'].map(self._p2n) # turn proto name into number
-        df['pp'] = df[['port', 'proto']].apply(lambda g: tuple(x for x in g), axis=1)
-        # _pp2s maps (port, protonr) -> service name
-        self._pp2s = dict(zip(df['pp'], df['service']))
-        # _s2pp maps service -> [(port, proto), ...]
-        for k, v in self._pp2s.items():
-            self._s2pp.setdefault(v, []).append(k)
+        self._port_toservice = dct
+        self._service_toports.clear()
+        for port, service in dct.items():
+            self._service_toports.setdefault(service, []).append(port)
 
         return self
 
-    def proto_toname(self, num):
-        if 0 <= num <= 255:
-            return self._n2p.get(num, 'unknown')
-        return 'invalid'
-
-    def proto_byname(self, name):
-        return self._p2n.get(name.lower(), -1)
-
-    def proto_todescr(self, proto_id):
+    def portstr_topp(self, portstr):
+        'turn portstr into protocol numbers, e.g. "80/tcp" -> (80, 6)'
         try:
-            n = int(proto_id)
-            if 0 <= n <= 255:
-                return self._n2d.get(n, 'no description')
-            return 'invalid'
-        except ValueError:
-            n = self._p2n.get(proto_id, -1)
-            return self._n2d.get(n, 'no description')
+            parts = portstr.lower().split('/')
+            assert len(parts) == 2
+            portnr = int(parts[0])
+            protonr = self._name_tonum[parts[1]]
 
-    def pp_byport(self, portstr):
-        'turn string 80/tcp into (port, proto_nr), like (80, 6)'
+        except (IndexError, ValueError):
+            raise ValueError('{} invalid port/protocol'.format(portstr))
+
+        return (portnr, protonr)
+
+    def portstr_bypp(self, pp_nrs):
         try:
-            parts = portstr.split('/', 1)
-            if len(parts) != 2:
-                return (-1, -1)
-            proto = self._p2n.get(parts[1].lower(), -1)
-            port = int(parts[0])
-            if 0 <= port <= 65535:
-                return (port, proto)
-            return (-1, proto)
+            port, proto = pp_nrs
         except ValueError:
-            return (-1, proto)
-        except AttributeError:
-            return (-1, -1)  # wrong type of argument
+            raise ValueError('{!r} not a (port, proto)-tuple'.format(pp_nrs))
+        if 0 < port > 65535:
+            raise ValueError("'{}' invalid IP4 port number".format(port))
+        if 0 < proto > 255:
+            raise ValueError("'{}' invalid IP4 protocol number".format(proto))
+        return '{}/{}'.format(port, self._num_toname.get(proto, '?'))
 
-    def pp_toport(self, port, proto):
-        'based on port, proto numbers return port/protocol string'
-        port = -1 if not (0 <= port <= 65535) else port
-        if 0 <= proto <= 255:
-            return '{}/{}'.format(port, self._n2p.get(proto, 'unknown'))
-        return '{}/invalid'.format(port)
+    def portstr_touints(self, portstr):
+        'turn port-port/proto into list of uints (proto << 16 + port nr)'
+        if '/' not in portstr:
+            raise ValueError('{} is missing protocol'.format(portstr))
+        x = re.split('-|/', portstr)
 
-    def pp_byservice(self, service):
-        'based on service name like https, return [(443, 6), (443, 17)]'
-        return self._s2pp.get(service.lower(), [(-1, -1)])
+        if not len(x) in (2,3):
+            raise ValueError('{!r} is malformed'.format(portstr))
+        if x[-1].lower() not in self._name_tonum:
+            raise ValueError('{!r} has unknown protocol'.format(portstr))
 
-    def pp_toservice(self, port, proto):
-        'based on (port, proto)-numbers, return service name like https'
-        if not (0 <= port <= 65535):
-            return 'invalid'
-        if not (0 <= proto <= 255):
-            return 'invalid'
-        return self._pp2s.get((port, proto), 'unknown')
+        try:
+            proto = self._name_tonum[x[-1].lower()]
+            start = int(x[0])
+            stop = int(x[1]) if len(x) == 3 else start
+            rv = [ proto * 65536 + x for x in range(start, stop+1)]
+        except ValueError as e:
+            raise ValueError('{!r} not valid portstring'.format(portstr))
+
+        return rv
+
+    def portstr_byuints(self, uints):
+        'turn list of uints into portstrings'
+        # [x1,x2,..)] -> n-m/proto, ..
+        if len(uints) < 1:
+            raise ValueError('{!r} not a valid uints list'.format(uints))
+        uints = sorted(uints)     # order lowest to highest
+        pival = [[uints[0], 1]]   # start with interval of length 1
+        for uint in uints[1:]:
+            if sum(pival[-1]) == uint:  # add consecutive uints to interval
+                pival[-1][1] += 1
+            else:
+                pival.append([uint, 1]) # else start new interval
+
+        rv = []
+        for uint, nump in pival:
+            proto = self._num_toname.get((uint // 65536) & 0xFF, '?')
+            port = uint & 0xFFFF
+            if nump > 1:
+                rv.append('{}-{}/{}'.format(port,port+nump-1,proto))
+            else:
+                rv.append('{}/{}'.format(port, proto))
+
+        return rv
+
+
+
+
+        return summ
+
+
+    def service_toports(self, service):
+        'service name to its known portstrings, eg http->[80/tcp, 80/udp]'
+        return self._service_toports.get(service.lower(), [])
+
+    def service_topps(self, service):
+        'service name to known port,proto-tuples list'
+        # https -> [443,6),(443,17)]'
+        return [self.portstr_topp(x) for x in self.service_toports(service)]
+
+    def set_service(self, service, portstrings):
+        'set known ports for a service, eg http->[80/tcp]'
+        # TODO: check validity, remove spaces etc ...
+        self._service_toports[service.lower()] = [x.lower() for x in
+                                                  portstrings]
 
 class IpFilter(object):
 
@@ -408,55 +388,15 @@ class IpFilter(object):
 
 if __name__ == '__main__':
 
-    print('-'*30, 'creating rules in code')
-    ipf = IpFilter(Ip4Proto().load_files())
-    ipf.add(9, '10.11/24/8, 10.10/24', '11/8', '23/udp, 35/tcp, 65535/sctp', 'permit', 'http')
-    ipf.add(2, '10/8', '11/8', '80/tcp', 'permit', 'http')
-    ipf.add(3, '11/8', '12/8', '80/tcp', 'permit', 'http')
-    ipf.add(3, '11/8', '13/8', '88/tcp', 'permit', 'kerberos')
-    ipf.add(2, '10/8', '19/8', '80/tcp')
-    ipf.add(2, '14/8', '19/8', '80/tcp')
-    ipf.add(2, '15/8', '19/8', '80/tcp')
-    ipf.add(2, '15/8', '192.192.192.192', '81/tcp')
-    ipf.add(4, '15/8', '192/8', '81/tcp')
+    ipp = Ip4Proto(proto_json='dta/ip4-protocols.json',
+                   services_json = 'dta/ip4-services.json')
+    portstr = '0-14/tcp'
+    uints = ipp.portstr_touints(portstr)
+    ivals = [(x, 1) for x in uints]
+    print('portstr', portstr)
+    print('uints  ', uints)
+    print('ivals  ', ivals)
+    print('summary', ut.ival_summary(ivals))
+    print('pfxsumm', [ut.ival2pfx(x) for x in ut.ival_summary(ivals)])
+    print('range  ', ipp.portstr_byuints(uints))
 
-    print()
-    if ipf.to_csv('scr/rules.csv'):
-        print('saved to file')
-
-    print('-'*30, 'current rules')
-    for line in ipf.lines(csv=False):
-        print(line)
-
-    print('15/8 -> 192.192.192.192 hits rules', ipf.find('15.0.0.0/8',
-                                                         '192.192.192.192', None))
-    print('15/8', ipf._src['15.0.0.0/8'])
-    print('192', ipf._dst['192.192.192.192'])
-    print('15/8', ipf._src['15.0.0.0/8'])
-    print('192', ipf._dst['192.192.192.192'])
-
-    for s,d,p in [('10.10.10.1', '11.11.11.1', (23, 17)),
-                  ('15.15.15.1', '19.19.19.1', (80, 6)),
-                  ('15.15.15.15', '192.0.0.1', (81, 6))]:
-        print(s,d,p,'->', ipf.match(s,d,p))
-
-    print()
-    print('-'*30, 'clear rules and reading from file')
-    ipf.clear()
-    print('reading from file')
-    ipf.from_csv('scr/rules.csv')
-
-    print('-'*30)
-    print('rules created from csv-file')
-    for line in ipf.lines(csv=False):
-        print(line)
-
-    print('15/8 -> 192.192.192.192 hits rules', ipf.find('15.0.0.0/8',
-                                                         '192.192.192.192', None))
-    print('15/8', ipf._src['15.0.0.0/8'])
-    print('192', ipf._dst['192.192.192.192'])
-
-    for s,d,p in [('10.10.10.1', '11.11.11.1', (23, 17)),
-                  ('15.15.15.1', '19.19.19.1', (80, 6)),
-                  ('15.15.15.15', '192.0.0.1', (81, 6))]:
-        print(s,d,p,'->', ipf.match(s,d,p))
