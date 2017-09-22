@@ -1377,7 +1377,7 @@ def main():
             sys.exit(1)
 
     # if last command is not a write, write to stdout
-    if not args.cmds[-1][1] in ['w', 'write']:
+    if not args.cmds[-1][1] in ['w', 'write', 'show']:
         hdlr.run('write', [], [])
 
     return 0

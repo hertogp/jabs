@@ -199,23 +199,11 @@ class IpFilter(object):
             else:
                 tbl[pfx] = set([rid])   # it's a new prefix
 
-            # due to the way lookup src,dst works, we need to propagate
-            # the rid to more specific matches as well.
-            # needs to be sanitized when writing to csv, otherwise it'll look
-            # weird when writing out a rulebase after reading it first...
-            # TODO: this probably should be in a finalize() or optimize() call
-            # after adding all rules, because doing this per prefix added will
-            # catch more specific already present in the rulebase, but will miss
-            # out on more specifics that are added later on... unless we also
-            # traverse the table for less specifics and adopt their rids here as
-            # well...
-            #
-
-            # donate rid to more specifics currently in the rulebase
+            # propagate rid to more specifics
             for kid in tbl.children(pfx):  # propagate rid to the more specifics
                 tbl[kid].add(rid)
 
-            # TODO: adopt rules matched by less specifics
+            # adopt rids matched by less specific parent (if any)
             parent = tbl.parent(pfx)
             if parent:
                 tbl[pfx] = tbl[pfx].union(tbl[parent])
@@ -226,6 +214,16 @@ class IpFilter(object):
 
     def _set_port(self, rid, port):
         'set ports on a some rule id'
+        # valid port names include:
+        # port/proto      = single port like 80/tcp
+        # port-port/proto = port range like 80-88/tcp
+        # any/proto       = port range like any/tcp == 0-65535/tcp
+        # any             = any port on any protocol == 0-65535/0-255
+        # 
+        # portpfxs = self.ip4.piv_touints(portstr)
+        # for pvx in self.portpfxs:
+        #     self._set_pfx(rid, self._piv, pvx)
+
         pp = self.ip4.pp_byport(port)  # gets (port, protocol)
         tbl = self._pp.get(pp, None)
         if tbl is None:
@@ -301,8 +299,6 @@ class IpFilter(object):
             return self._act.get(min(rids), False)
         except (KeyError, ValueError):
             return None  # empty set or a failed key lookup == no Match -> None
-
-
 
     def matchp(self, src, dst, port):
         'same as match, but port is "port/proto"'
