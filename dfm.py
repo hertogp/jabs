@@ -73,7 +73,8 @@ import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from utils import *
+from ipf import Ip4Filter
+import utils as ut
 
 #-- Logging
 
@@ -150,7 +151,7 @@ def parse_args(argv):
     arg.prog = argv[0]
     arg.cmds = []
     for cmd in arg.command:
-        arg.cmds.append([cmd, *cmd_parser(cmd_tokens(cmd))])
+        arg.cmds.append([cmd, *ut.cmd_parser(ut.cmd_tokens(cmd))])
 
     return arg
 
@@ -213,7 +214,7 @@ class Commander(object):
             self.fatal(errors, None, None)
 
         log.debug('original columns names  : {}'.format(df.columns.values))
-        df.columns = [normalize(n) for n in df.columns]
+        df.columns = [ut.normalize(n) for n in df.columns]
         log.debug('normalized columns names: {}'.format(df.columns.values))
 
         return df
@@ -1353,6 +1354,7 @@ class Commander(object):
             self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
 
         return self
+
 
 def main():
     'load csv and run it through the cli commands given'

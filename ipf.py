@@ -191,12 +191,12 @@ IP4PROTOS = {
     254: ['ip254', 'Use for experimentation and testing'],
 }
 
-class Ip4Proto(object):
+class Ip4Protocol(object):
     'helper to translate strings to port,protocol nrs'
-    ip4_proto_json = 'dta/ip4-protocols.json'
-    ip4_services_json = 'dta/ip4-services.json'
+    ip4_proto_json = 'ip4-protocols.json'
+    ip4_services_json = 'ip4-services.json'
 
-    def __init__(self, proto_json=None, services_json=None):
+    def __init__(self, load_services=False):
         self._num_toname = {}       # e.g. 6 -> 'tcp'
         self._num_todesc = {}       # e.g. 6 -> 'Transmission Control'
         self._name_tonum = {}       # e.e. 'tcp' -> 6
@@ -204,10 +204,10 @@ class Ip4Proto(object):
         self._port_toservice = {}   # 'port/proto'     -> ip4-service-name
 
 
-        if proto_json:
-            self.load_protos(proto_json)
-        if services_json:
-            self.load_services(services_json)
+        # the json files are data files produced for ipf.py by updta.py
+        self.load_protos('ip4-protocols.json')
+        if load_services:
+            self.load_services('ip4-services.json')
 
     def load_protos(self, filename):
         'read json encoded ip4-protocol information'
@@ -281,7 +281,7 @@ class Ip4Proto(object):
 class Ival(object):
     'helper class in (uint, num) conversions to/from port-ranges & pfxs'
     # ipv4 only
-    ipp = Ip4Proto().load_protos('dta/ip4-protocols.json')
+    ipp = Ip4Protocol()
 
     def __init__(self, start = 0, length = 0):
         self.start = start    # unsigned int for a.b.c.d or 0.proto.p1.p2
@@ -542,13 +542,13 @@ class Ival(object):
 
 class Ip4Filter(object):
 
-    def __init__(self, pp):
+    def __init__(self):
         self._src = pt.PyTricia()  # pfx  -> set([rid's]) - source ip addr
         self._dst = pt.PyTricia()  # pfx  -> set([rid's]) - destination ip addr
         self._dpp = pt.PyTricia()  # pfx' -> set([rid's]) - dest. port/protocol
         self._act = {}             # rid -> action (True of False)
         self._tag = {}             # rid -> tag
-        self._pp = pp              # an Ip4Protocol object
+        self._pp = Ip4Protocol()   # an Ip4Protocol object
         self._nomatch = None       # is returned when filter has no match
 
     def _set_rid(self, rid, tbl, pfx):
@@ -702,9 +702,11 @@ class Ip4Filter(object):
     def to_csv(self, fname):
         'write ruleset to csv-file'
         try:
-            with open(fname, 'w') as outf:
-                for line in self.lines(csv=True):
-                    print(line, file=outf)
+            outf = fname if fname is sys.stdout else open(fname, 'w')
+            for line in self.lines(csv=True):
+                print(line, file=outf)
+            if outf is not sys.stdout:
+                outf.close()
         except (IOError, OSError) as e:
             fmt = 'error saving {!}: {!r}'
             raise OSError(fmt.format(fname, e))
@@ -753,13 +755,13 @@ def parse_args(argv):
 
 if __name__ == '__main__':
 
-    ipf = Ip4Filter(Ip4Proto().load_protos('dta/ip4-protocols.json'))
-    ipf.from_csv('scr/rules.csv')
+    ipf = Ip4Filter()
+    ipf.from_csv('dta/rules2.csv')
     print()
     print('\n'.join(ipf.lines()))
+    print()
+    ipf.to_csv('dta/rules2.csv')
     print(ipf.match('11.1.1.1', '12.2.2.2', '80/tcp'))
     print(ipf.tag('11.1.1.1', '12.2.2.2', 80, 6))
 
-    ipp = Ip4Proto()
-    ipp.load_protos('dta/ip4-protocols.json')
 
