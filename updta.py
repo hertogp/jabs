@@ -81,7 +81,7 @@ def load_protocols(url):
         proto = row['protocol']
         orgkey =  row['keyword']
         for num in range(start, stop+1):
-            keyw = '{}/ip'.format(num) if pd.isnull(orgkey) else orgkey
+            keyw = 'ip{}'.format(num) if pd.isnull(orgkey) else orgkey
             rows.append({'decimal': str(num),
                          'keyword': keyw,
                          'protocol': proto})
@@ -92,7 +92,7 @@ def load_protocols(url):
     # set any remaining NaN keywords to <nr>
     # donot use '{}/ip'.format(df['decimal']) <-- insert whole decimal column ..
     df['keyword'] = np.where(df['keyword'].isnull(),
-                             df['decimal'] + '/ip',
+                             'ip' + df['decimal'],
                              df['keyword'])
 
     # set any remaining NaN protocols to keyword

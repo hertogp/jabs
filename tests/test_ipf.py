@@ -25,198 +25,67 @@ class TestIpProto(object):
                     ('vrrp', 112),
                     ]
 
-    def test_intial_info(self):
-        p = ipf.Ip4Proto()
-        assert len(p._n2p) > 0
-        assert len(p._n2p) == len(p._p2n)
-        assert len(p._n2p) == len(p._n2d)
-        assert len(p._s2pp) > 0
-        assert len(p._pp2s) > 0
+    def test_init(self):
+        ipp = ipf.Ip4Proto()
+        assert len(ipp._num_toname) == 0
+        assert len(ipp._num_todesc) == 0
+        assert len(ipp._name_tonum) == 0
+        assert len(ipp._service_toports) == 0
+        assert len(ipp._port_toservice) == 0
 
-    def _test_protos(self, p):
-        'test proto_ functions using specific instance p'
-        for num, name in p._n2p.items():
-            assert p.proto_toname(num) == name
-            assert p.proto_byname(name) == num
+    def test_init_loading(self):
+        ipp = ipf.Ip4Proto(proto_json='dta/ip4-protocols.json')
+        assert len(ipp._num_toname) == 256
+        assert len(ipp._num_todesc) == 256
+        assert len(ipp._name_tonum) > 0
 
-        for name, num in p._p2n.items():
-            assert p.proto_byname(name) == num
-            assert p.proto_toname(num) == name
-
-
-    def test_protos_initial(self):
-        'test proto_xxname functions'
-        p = ipf.Ip4Proto()
-        self._test_protos(p)
-
-    def test_loaded_protos(self):
-        p = ipf.Ip4Proto().load_files()
-        self._test_protos(p)
-
-    def test_initital_known_protos(self):
-        'test protocol names initially known'
-        p = ipf.Ip4Proto()
-        for name, proto in self.known_protos:
-            assert p.proto_byname(name) == proto
-            assert p.proto_toname(proto) == name
-
-    def test_loaded_protos(self):
-        'test some protocol names after loading files'
-        p = ipf.Ip4Proto().load_files()
-        for name, proto in self.known_protos:
-            assert p.proto_byname(name) == proto
-            assert p.proto_toname(proto) == name
-
-    def _test_services(self, p):
-        'test pp_xxservice functions'
-        for s, pps in p._s2pp.items():
-            # service -> [(port, proto), ..], e.g. https, [(443, 6), (443, 17)]
-            # check pp_byservice returns the proper set of (p,p)'s given a name
-            assert set(pps) == set(p.pp_byservice(s))
-            for pp in pps:
-                # check pp_toservice returns correct service given a (p,p)
-                assert s == p.pp_toservice(*pp)
-
-    def test_initial_services(self):
-        p = ipf.Ip4Proto()
-        self._test_services(p)
-
-    def test_loaded_services(self):
-        p = ipf.Ip4Proto().load_files()
-        self._test_services(p)
-
-    def test_initial_known_services(self):
-        'test some original services known'
-        p = ipf.Ip4Proto()
-        known_services = [('https', [(443, 6), (443, 17)]),
-                          ('http', [(80, 6), (80, 17)]),
-                          ('snmp', [(161, 17)]),
-                          ('smtp', [(25, 6)]),
-                          ('dns', [(53, 6), (53,17)]),
-                          ]
-        for s, pps in known_services:
-            for pp in pps:
-                assert s == p.pp_toservice(*pp)
-                assert set(pps) == set(p.pp_byservice(s))
-
-    def test_proto_dct_integrity(self):
-        'check ._n2p and _.p2n maps are complementary'
-        p = ipf.Ip4Proto().load_files()
-        # protocol name <-> protocol number
-        for name, num in p._p2n.items():
-            assert num in p._n2p
-            assert name == p._n2p[num]
-        # protocol number <-> protocol name
-        for num, name in p._n2p.items():
-            assert name in p._p2n
-            assert num == p._p2n[name]
-
-    def test_serv_dct_integrity(self):
-        'check ._pp2s and ._s2pp maps are complementary'
-        p = ipf.Ip4Proto().load_files()
-        # (port, protocols) <-> name
-        for pp, name in p._pp2s.items():
-            assert name in p._s2pp
-            assert pp in p._s2pp[name]
-        # name <-> [(port, protocol), ..]
-        for name, pps in p._s2pp.items():
-            for pp in pps:
-                assert p._pp2s[pp] == name
-
-    def _test_ports(self, p):
-        'test ports "num/protocol"-string <-> (num, protonr)'
-        # self._n2p and self._p2n are complementary
-
-        for name, proto_num in p._p2n.items():
-            port_num = random.randrange(65535)
-            port = '{}/{}'.format(port_num, name)
-            # 80/tcp -> (80, 6)
-            assert (port_num, proto_num) == p.pp_byport(port)
-            # (80, 6) -> 80/tcp
-            assert port == p.pp_toport(port_num, proto_num)
-
-    def test_initial_ports(self):
-        p = ipf.Ip4Proto()
-        self._test_ports(p)
-
-    def test_loaded_ports(self):
-        p = ipf.Ip4Proto().load_files()
-        self._test_ports(p)
-
-    def test_some_common_ports(self):
-        'simply to show usage of pp_byport'
-        p = ipf.Ip4Proto().load_files()
-        assert p.pp_byport('80/tcp') == (80, 6)
-        assert p.pp_byport('443/tcp') == (443, 6)
-        assert p.pp_byport('25/tcp') == (25, 6)
-
-        assert p.pp_byport('53/udp') == (53, 17)
-        assert p.pp_byport('161/udp') == (161, 17)
-
-    def test_some_common_services(self):
-        'simply to show usage of pp_byservice'
-        p = ipf.Ip4Proto().load_files()
-        assert (53, 17) in p.pp_byservice('domain')
-        assert (443, 6) in p.pp_byservice('https')
-        assert (22, 6) in p.pp_byservice('ssh')
-
-    def test_names_are_case_insensitive(self):
-        'check lookups are performed case-insensitive'
-        p = ipf.Ip4Proto().load_files()
-        assert (22, 6) in p.pp_byservice('SsH')
-        assert (443, 6) in p.pp_byservice('HtTpS')
-
-        assert 6 == p.proto_byname('TcP')
-        assert 17 == p.proto_byname('uDp')
-
-        assert (80, 6) == p.pp_byport('80/TcP')
-
-    def test_failed_ports(self):
-        'check error values when lookup fails'
-        p = ipf.Ip4Proto().load_files()
-        assert (1, -1) == p.pp_byport('1/xxx')      # unknown protocol name
-        assert (-1, -1) == p.pp_byport('25')        # missing protocol name
-        assert (-1, -1) == p.pp_byport('tcp')       # missing port number
-        assert (-1, 6) == p.pp_byport('65536/tcp')  # illegal port number
-        assert (-1, -1) == p.pp_byport(123)         # wrong type of arg
-        assert (-1, -1) == p.pp_byport(12.3)         # wrong type of arg
-
-        assert '25/invalid' == p.pp_toport(25, 256) # illegal protocol number
-        assert '-1/tcp' == p.pp_toport(65536, 6)    # illegal port number
-        assert '-1/invalid' == p.pp_toport(65536, 256) # both illegal
-        with pytest.raises(TypeError):
-            p.pp_toport(25, '256')
-            p.pp_toport('25', 60)
-
-    def test_failed_services(self):
-        'check error values when lookup fails'
-        p = ipf.Ip4Proto().load_files()
-
-        assert [(-1, -1)] == p.pp_byservice('xxx')  # unknown service
-
-        assert 'invalid' == p.pp_toservice(65536, 6) # illegal port nr
-        assert 'invalid' == p.pp_toservice(-1, 6)
-        assert 'invalid' == p.pp_toservice(25, 256)  # illegal proto nr
-        assert 'invalid' == p.pp_toservice(25, -1)
-        assert 'invalid' == p.pp_toservice(65536, 256) # both illegal
-        assert 'invalid' == p.pp_toservice(-1, -1) # both illegal
-
-        with pytest.raises(TypeError):
-            p.pp_toservice(25, '6')
-            p.pp_toservice('25', 6)
-            p.pp_toservice('25', '6')
+        ipp = ipf.Ip4Proto(services_json='dta/ip4-services.json')
+        assert len(ipp._service_toports) > 0
+        assert len(ipp._port_toservice) > 0
 
 
-    def test_failed_protocols(self):
-        'check error values when lookup fails'
-        p = ipf.Ip4Proto().load_files()
+class TestIval_from_portstr(object):
+    'test Ival.from_portstr'
+    # portstr is:
+    # any, any/protocol, port/protocol, port-port/protocol
 
-        assert 'invalid' == p.proto_toname(-1)       # illegal proto nr
-        assert 'invalid' == p.proto_toname(256)
+    def test_any(self):
+        # any port, any protocol -> length is 2**32 with base 0
+        assert ipf.Ival.from_portstr('any') == ipf.Ival(0, 2**32)
 
-        assert -1 == p.proto_byname('xxx')           # unknown proto name
+    def test_any_proto(self):
+        # any sctp port (port = 16 uint so 2**16 ports
+        assert ipf.Ival.from_portstr('any/hopopt') == ipf.Ival(0, 2**16)
+        assert ipf.Ival.from_portstr('any/tcp') == ipf.Ival(6 * 2**16, 2**16)
+        assert ipf.Ival.from_portstr('any/udp') == ipf.Ival(17 * 2**16, 2**16)
+        assert ipf.Ival.from_portstr('any/sctp') == ipf.Ival(132 * 2**16, 2**16)
+        # only 255 has protocol name reserverd ... hmmm..
+        assert ipf.Ival.from_portstr('any/reserved') == ipf.Ival(255 * 2**16, 2**16)
 
-        with pytest.raises(TypeError):
-            p.proto_toname('1')
-            p.proto_byname(16)
+    def test_from_portstr_1port_protocol(self):
+        assert ipf.Ival.from_portstr('0/sctp') == ipf.Ival(132 * 2**16 + 0, 1)
+        assert ipf.Ival.from_portstr('1/sctp') == ipf.Ival(132 * 2**16 + 1, 1)
+        assert ipf.Ival.from_portstr('65535/sctp') == ipf.Ival(132 * 2**16 +
+                                                               65535, 1)
+
+    def test_from_portstr_nports_protocol(self):
+        # still 1 port
+        assert ipf.Ival.from_portstr('0-0/sctp') == ipf.Ival(132 * 2**16, 1)
+        # two ports
+        assert ipf.Ival.from_portstr('0-1/sctp') == ipf.Ival(132 * 2**16, 2)
+        # 128 ports
+        assert ipf.Ival.from_portstr('0-127/sctp') == ipf.Ival(132 * 2**16, 128)
+        # 130 ports (not a power of 2)
+        assert ipf.Ival.from_portstr('1-130/sctp') == ipf.Ival(132 * 2**16 + 1, 130)
+
+
+
+class TestIval_to_portstr(object):
+    'test Ival.to_portstr'
+
+    def test_any(self):
+        assert ipf.Ival(0, 2**32).to_portstr() == 'any'
+
+
+
 
