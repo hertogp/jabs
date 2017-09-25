@@ -408,8 +408,10 @@ class Ival(object):
         err = 'invalid ipv4 prefix string {!r}'
         pfx = pfxstr.lower()  # keep pfxstr as-is for exceptions (if any)
         if pfx == 'any':
-            return cls(0, 2**32)
+            return cls(0, 2**32)   # i.e. 0/0
 
+        if pfx.count('.') > 3:
+            raise ValueError(err.format(pfxstr))
         try:
             # options /pfx-len, defaults to /32 if absent
             x = pfx.split('/', 1)
@@ -417,21 +419,21 @@ class Ival(object):
             if plen < 0 or plen > 32:
                 raise ValueError(err.format(pfxstr))
 
-            if plen == 0:
-                return cls(0, 2**32)
-
-            length = 2**(32-plen)
-
-            # a.b.c.d may be shortened to a, a.b or a.b.c
-            # - filter handles weird dots like a. or a...
-            x = list(map(int, filter(None, x[0].split('.'))))
-            if len(x) > 4:
+            # x = list(map(int, filter(None, x[0].split('.'))))
+            # donot allow double dots or trailing dots
+            x = list(map(int, x[0].split('.')))
+            if len(x) < 1 or len(x) > 4:
                 raise ValueError(err.format(pfxstr))
             elif len(x) < 4:
                 x = (x + [0, 0, 0, 0])[0:4]
             for digit in x:
                 if digit < 0 or digit > 255:
                     raise ValueError(err.format(pfxstr))
+
+            # only after checking any digits, return 0/0 if plen is 0
+            if plen == 0:
+                return cls(0, 2**32)
+            length = 2**(32-plen)
 
             start = x[0] * 2**24 + x[1] * 2**16 + x[2] * 2**8 + x[3]
 
@@ -552,9 +554,9 @@ class Ival(object):
             if y:
                 z = cls._combine(x, y, pfx) # y is None when x combines x+y
                 if z:
-                    heap.append(x)  # combined range back on heap
+                    heap.append(z)  # combined range back on heap
                 else:
-                    rv.append(y)  # could not combine, both goto rv
+                    rv.append(y)  # could not combine, both goto rv and
                     rv.append(x)  # make sure to keep rv ordering intact
 
             else:
@@ -653,30 +655,35 @@ class Ip4Filter(object):
         self._act = {}             # rid -> action (True of False)
         self._tag = {}             # rid -> tag
 
-    def get_rids(self, src, dst, dpp):
+    def get_rids(self, src, dst, port=None, proto=None):
         'return the set of rule ids matched by session-tuple'
+        if port is None:
+            dpp = None
+        elif proto is None:
+            dpp = Ival.from_portstr(port).to_pfx()
+        else:
+            dpp = Ival.from_portproto(port, proto).to_pfx()
+
         try:
-            # KeyError means no match in a src, dst or dpp table
+            # KeyError = no match in a src, dst or dpp table -> empty set
             rids = self._dst[dst]
-            rids = rids.intersection(self._dpp[dpp])
+            if dpp is not None:
+                rids = rids.intersection(self._dpp[dpp])
             return rids.intersection(self._src[src])
         except (KeyError, ValueError):
             return set()
 
-    def match(self, src, dst, port, proto=None):
+    def match(self, src, dst, port=None, proto=None):
         'return True (permit), False (no permit) or the nomatch value'
-        # if proto is given as the protocol number, port should be the port number
-        dpp = Ival.from_portproto(port, proto) if proto else Ival.from_portstr(port)
-        rids = self.get_rids(src, dst, dpp.to_pfx())
+        rids = self.get_rids(src, dst, port, proto)
         if len(rids) == 0:
             return self._nomatch
         # TODO: make it an error is a rule-id is missing from _act
         return self._act.get(min(rids), self._nomatch)
 
-    def tag(self, src, dst, port, proto=None):
+    def tag(self, src, dst, port=None, proto=None):
         'return tag value of matched rule or the nomatch value'
-        dpp = Ival.from_portproto(port, proto) if proto else Ival.from_portstr(port)
-        rids = self.get_rids(src, dst, dpp.to_pfx())
+        rids = self.get_rids(src, dst, port, proto)
         if len(rids) == 0:
             return self._nomatch
         # TODO: make it an error is a rule-id is missing from _act

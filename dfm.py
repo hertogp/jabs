@@ -1307,11 +1307,16 @@ class Commander(object):
             errors.append('cannot find ipl-table {!r} on disk'.format(rhs[0]))
         self.fatal(errors, lhs, rhs)
 
-        # get cached table, or read from disk
         table, src, *getfields = rhs
-        # TODO: changes this so load_ipt(table) is only evaluated when IPT_MAP has
-        # no 'table'.  Using setdefault will eval it every time pfx is called.
-        ipt = IPT_MAP.setdefault(table, load_ipt(table))
+        # get cached table, or read from disk
+        ipt = IPT_MAP.get(table, None)
+        if ipt is None:
+            log.info('reading {} from disk'.format(table))
+            ipt = load_ipt(table)
+            IPT_MAP[table] = ipt
+        else:
+            log.info('table {} retrieved from cache'.format(table))
+        log.info('table {} has {} entries'.format(table, len(table)))
 
         # sanity check ip lookup table
         if len(ipt) < 1:
@@ -1346,22 +1351,38 @@ class Commander(object):
 
     def cmd_ipf(self, lhs, rhs):
         '''
-        syntax: [fx]=ipf:filter[.csv],src,dst[port]
-        info: either filter rows or put tag from matched rule in fx
+        syntax: [fx]=ipf:filter[.csv],src,dst[,port[,proto]]
+        info: either filter rows or put the tag of matching rules in fx
         descr:
            'ipf:' loads the rule-set given by filter.csv and uses the listed
-           src,dst,port-fields to try and match them against the filter.
+           src,dst,port-fields to try and match them against the filter.  The
+           filter cached in case the same filter is used again for tagging
+           instead of filtering (or vice versa).
 
-           If no fx field in the left-hande side is given, rows with a negative
-           match will be filtered out.  Otherwise, the tag from the first rule
-           to match will be assigned to fx.
+           If no lhs-field fx is given, rows with a negative match will be
+           filtered out.  Otherwise, the tag from the first rule to match will
+           be assigned to fx.
 
-           The port field is either one field of type 'port/protocol', like
-           '80/tcp' or consists of 2 fields: port- and protocol-numbers.
+           If you only use the port-field, it should be port/proto values, like
+           80/tcp.  If both port, proto are given the should list the port,
+           protocol numbers like 80, 17.
+
+           The rhs-fields, except the first one which should refer to an
+           existing filter file on disk, should be existing columns in the
+           dataframe.
+
+           The filter[.csv] file should list a rule-base with columns:
+           rule, src_ip, dest_ip, dest_port, action, tag.  Something like:
+
+             rule,src_ip,dest_ip,dest_port,action,tag
+             1,10/8,10.10.10.10,80/tcp,permit,intranet1
+             2,10/8,10.10.10.11,5000-6000/tcp,deny,drop-rule1
+             ,10/8,10.10.10.12,,,
+             3,any,any,any,deny,generic-drop
 
            Example:
-           tag=ipf:apps,src_ip,dest_ip,port          # port is eg 80/tcp
-           tag=ipf:apps,src_ip,dest_ip,port,protocol # port,protocol = 80, 17
+           tag=ipf:myfilter,my_src,my_dest,dport         # dport is eg 80/tcp
+           tag=ipf:myfilter,my_src,my_dest,dport,dproto  # dport,dproto = 80,17
         '''
         # sanity check lhs, rhs
         errors = []
@@ -1400,19 +1421,16 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
         nomatch = '' if dest_field else False   # tag empty string for a miss
         old_nomatch = ipf.set_nomatch(nomatch)  # nomatch => filter session out
+        ipfunc = ipf.tag if dest_field else ipf.match
 
         def match(row):
-            ipfunc = ipf.tag if dest_field else ipf.match
             try:
-                if port is None:  # port is None, so proto is also None
+                if port is None:  # not using any port information
                     return ipfunc(row[src], row[dst])
-                elif proto is None:  # port not None, but proto is
+                elif proto is None:  # port is portstring, eg 80/tcp
                     return ipfunc(row[src], row[dst], row[port])
-                else:  # neither port nor proto are None
-                    return ipfunc(row[src], row[dst], row[port],
-                                          row[proto])
-            except KeyError:
-                return False
+                else:  # port, proto are nrs, eg 80, 17
+                    return ipfunc(row[src], row[dst], row[port], row[proto])
             except Exception as e:
                 self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
 
