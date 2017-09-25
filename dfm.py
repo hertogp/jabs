@@ -87,8 +87,8 @@ log.setLevel(logging.WARNING)
 __version__ = '0.1'
 
 VERBOSE = 0   # verbosity level is zero by default
-CMD_MAP = {}  # dfm func name -> func reference
-IPT_MAP = {}  # ipt fname -> ip-table
+IPT_MAP = {}  # ipt[fname] -> ip-table
+IPF_MAP = {}  # ipf[fname] -> ip filter
 
 #-- CMD Registry
 
@@ -156,17 +156,6 @@ def parse_args(argv):
     return arg
 
 #-- commands
-def register_cmd(func=None, *, name=None):
-    'decorator that register_cmds cmd by name in global CMD_MAP dispatch dict'
-    if func is None:
-        return partial(register_cmd, name=name)     # @register_cmd(name=...) variant
-    func.__name__ = name if name else func.__name__   # used by cmd_error
-    CMD_MAP[func.__name__] = func
-    return func
-
-class CmdError(Exception):
-    pass
-
 class Commander(object):
     'Manipulate the heck out of a dataframe'
 
@@ -1355,6 +1344,92 @@ class Commander(object):
 
         return self
 
+    def cmd_ipf(self, lhs, rhs):
+        '''
+        syntax: [fx]=ipf:filter[.csv],src,dst[port]
+        info: either filter rows or put tag from matched rule in fx
+        descr:
+           'ipf:' loads the rule-set given by filter.csv and uses the listed
+           src,dst,port-fields to try and match them against the filter.
+
+           If no fx field in the left-hande side is given, rows with a negative
+           match will be filtered out.  Otherwise, the tag from the first rule
+           to match will be assigned to fx.
+
+           The port field is either one field of type 'port/protocol', like
+           '80/tcp' or consists of 2 fields: port- and protocol-numbers.
+
+           Example:
+           tag=ipf:apps,src_ip,dest_ip,port          # port is eg 80/tcp
+           tag=ipf:apps,src_ip,dest_ip,port,protocol # port,protocol = 80, 17
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) > 1:
+            errors.append('at most 1 lhs field allowed')
+        if len(rhs) not in (3,4,5):
+            errors.append('rhs must specifiy 3, 4 or 5 fields')
+            errors.append('filter-name, src and dst are mandatory')
+            errors.append('- port if field has port/proto-string, eg 80/tcp')
+            errors.append('- port,proto when they are protocol nrs, eg 80, 17')
+            errors.append('got {!r} instead'.format(rhs))
+        if not (os.path.isfile(rhs[0]) or
+                os.path.isfile('{}.csv'.format(rhs[0]))):
+            errors.append('cannot find ipf filter {!r} on disk'.format(rhs[0]))
+        self.check_fields(errors, rhs[1:])  # all other rhs fields must exist
+        self.fatal(errors, lhs, rhs)
+
+        # process lhs, rhs
+        # dest_field is used when tagging sessions instead of filtering
+        dest_field = lhs[0] if len(lhs) == 1 else None
+        # if port is None, then proto must be None as well
+        ipfilter, src, dst, port, proto = (rhs + [None, None])[0:5]
+        # get cached filter, or read from disk
+        ipf = IPF_MAP.get(ipfilter, None)
+        if ipf is None:
+            log.info('reading {} from disk'.format(ipfilter))
+            ipf = Ip4Filter(ipfilter)
+            IPF_MAP[ipfilter] = ipf
+        else:
+            log.info('filter retrieved from cache')
+        log.info('filter {} has {} rules'.format(ipfilter, len(ipf)))
+
+        # sanity check ip filter
+        if len(ipf) == 0:
+            errors.append('filter appears to be empty, no rules')
+        self.fatal(errors, lhs, rhs)
+        nomatch = '' if dest_field else False   # tag empty string for a miss
+        old_nomatch = ipf.set_nomatch(nomatch)  # nomatch => filter session out
+
+        def match(row):
+            ipfunc = ipf.tag if dest_field else ipf.match
+            try:
+                if port is None:  # port is None, so proto is also None
+                    return ipfunc(row[src], row[dst])
+                elif proto is None:  # port not None, but proto is
+                    return ipfunc(row[src], row[dst], row[port])
+                else:  # neither port nor proto are None
+                    return ipfunc(row[src], row[dst], row[port],
+                                          row[proto])
+            except KeyError:
+                return False
+            except Exception as e:
+                self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        try:
+            if dest_field:
+                self.dfm[dest_field] = self.dfm.apply(match, axis=1)
+            else:
+                self.dfm = self.dfm[self.dfm.apply(match, axis=1)]
+
+        except (KeyError, ValueError) as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+        except Exception as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        ipf.set_nomatch(old_nomatch)  # restore old nomatch value
+        return self
+
 
 def main():
     'load csv and run it through the cli commands given'
@@ -1373,9 +1448,6 @@ def main():
                 log.warn('Oops, forgot to read in a dataset?')
             else:
                 log.warn('Oops, runtime error {}'.format(e))
-            sys.exit(1)
-        except CmdError as e:
-            log.exception('command {} error: {}'.format(cmd, e))
             sys.exit(1)
 
     # if last command is not a write, write to stdout

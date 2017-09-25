@@ -8,6 +8,7 @@ ipf - ip filter
 
 import os
 import sys
+import argparse
 import logging
 import re
 import math
@@ -190,6 +191,37 @@ IP4PROTOS = {
     253: ['ip253', 'Use for experimentation and testing'],
     254: ['ip254', 'Use for experimentation and testing'],
 }
+
+def console_logging(log_level):
+    'setup console logging to level given by args.v'
+    console_fmt = logging.Formatter('%(funcName)s %(levelname)s: %(message)s')
+    console_hdl = logging.StreamHandler(stream=sys.stderr)
+    console_hdl.set_name('console')
+    console_hdl.setFormatter(console_fmt)
+    console_hdl.setLevel(log_level)
+    log.setLevel(log_level)
+    log.addHandler(console_hdl)
+
+def parse_args(argv):
+    'parse commandline arguments, return arguments Namespace'
+    p = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__)
+    padd = p.add_argument
+    padd('-p', '--protocols', action='store_false')
+    padd('-s', '--services', action='store_true')
+    padd('-v', '--verbose', action='store_const', dest='log_level',
+         const=logging.INFO, default=logging.WARNING,
+         help='show informational messages')
+    padd('-d', '--debug', action='store_const', dest='log_level',
+         const=logging.DEBUG, help='show debug messages')
+    padd('-V', '--Version', action='version',
+         version='{} {}'.format(argv[0], __version__))
+
+    arg = p.parse_args(argv[1:])
+    arg.prog = argv[0]
+    return arg
+
 
 class Ip4Protocol(object):
     'helper to translate strings to port,protocol nrs'
@@ -542,7 +574,7 @@ class Ival(object):
 
 class Ip4Filter(object):
 
-    def __init__(self):
+    def __init__(self, filename=None):
         self._src = pt.PyTricia()  # pfx  -> set([rid's]) - source ip addr
         self._dst = pt.PyTricia()  # pfx  -> set([rid's]) - destination ip addr
         self._dpp = pt.PyTricia()  # pfx' -> set([rid's]) - dest. port/protocol
@@ -550,6 +582,12 @@ class Ip4Filter(object):
         self._tag = {}             # rid -> tag
         self._pp = Ip4Protocol()   # an Ip4Protocol object
         self._nomatch = None       # is returned when filter has no match
+        self.filename = filename
+        if filename:
+            self.from_csv(filename)
+
+    def __len__(self):
+        return len(self._act)
 
     def _set_rid(self, rid, tbl, pfx):
         'set rule-id on single prefix in specific table'
@@ -569,7 +607,7 @@ class Ip4Filter(object):
                 tbl[pfx] = tbl[pfx].union(tbl[parent])
 
         except ValueError as e:
-            print('oopsie', pfx, repr(e))
+            log.error('invalid prefix? {} :{}'.format(pfx, repr(e)))
             sys.exit(1)
 
     def set_nomatch(self, nomatch):
@@ -719,7 +757,6 @@ class Ip4Filter(object):
         df['rule'].fillna(method='ffill', inplace=True)
         df.fillna(value='', inplace=True)
         df['rule'] = df['rule'].astype(int)
-        print(df)
         for idx, row in df.iterrows():
             rid = int(row['rule'])
             srcs = [x.strip() for x in row['src_ip'].split()]
@@ -753,15 +790,19 @@ def parse_args(argv):
 
     return arg
 
-if __name__ == '__main__':
-
+def main():
     ipf = Ip4Filter()
-    ipf.from_csv('dta/rules2.csv')
+    ipf.from_csv('scr/rules.csv')
     print()
     print('\n'.join(ipf.lines()))
     print()
-    ipf.to_csv('dta/rules2.csv')
+    ipf.to_csv('scr/rules2.csv')
     print(ipf.match('11.1.1.1', '12.2.2.2', '80/tcp'))
     print(ipf.tag('11.1.1.1', '12.2.2.2', 80, 6))
+    print('ipf has {} rules'.format(len(ipf)))
 
 
+if __name__ == '__main__':
+    args = parse_args(sys.argv)
+    console_logging(args.log_level)
+    sys.exit(main())
