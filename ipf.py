@@ -395,10 +395,10 @@ class Ival(object):
     def broadcast(self):
         'return new ival for broadcast prefix'
         imask = 2**32 ^ (self.length - 1)
-        return Ival(self.start ^ imask, self.length)
+        return Ival(self.start | imask, self.length)
 
     def address(self):
-        'return address part of prefix-interval'
+        'return address part of an interval (usually a pfx ival)'
         return Ival(self.start, 1).to_pfx()
 
     @classmethod

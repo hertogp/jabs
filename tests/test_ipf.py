@@ -118,10 +118,40 @@ class TestIval_as_port(object):
         assert ipf.Ival.from_portstr('0-65535/tcp').to_portstr() == 'any/tcp'
 
 
-class TestIval_as_port_proto(object):
+    def test_single_range(self):
+        'multiple ports combine into 1 range'
+        cases = [('80/tcp 81/tcp 82/tcp'.split(), '80-82/tcp'),
+                 ('89/udp 90/udp'.split(), '89-90/udp'),
+                 ('90/udp 89/udp'.split(), '89-90/udp')
+                 ]
+
+        for ports, summary in cases:
+            ivals = [ipf.Ival.from_portstr(x) for x in ports]
+            summ = ipf.Ival.port_summary(ivals)
+            assert len(summ) == 1
+            assert summ[0].to_portstr() == summary
+
+
+    def test_two_ranges(self):
+        'multiple ports that combine into two ranges'
+        cases = [('80/tcp 81/tcp 83/tcp 84/tcp'.split(),
+                  '80-81/tcp 83-84/tcp'.split()),
+                  ('84/tcp 80/tcp 83/tcp 81/tcp'.split(),
+                  '80-81/tcp 83-84/tcp'.split()),
+                 ]
+
+        for ports, ranges in cases:
+            ivals = [ipf.Ival.from_portstr(x) for x in ports]
+            summ = ipf.Ival.port_summary(ivals)
+            assert len(summ) == len(ranges)
+            assert all(x.to_portstr() in ranges for x in summ)
+
+
+
+class TestIval_as_portproto(object):
     'test Ival created from port, protocol nrs'
 
-    def test_good_port_protos(self):
+    def test_good_portprotos(self):
         valids = [(0, 0),  # port 0 for proto 0
                   (0, 1),  # port 0 for proto 1
                   (65535, 255),  # max port for protocol reserved
@@ -130,7 +160,7 @@ class TestIval_as_port_proto(object):
         for port, proto in valids:
             ipf.Ival.from_portproto(port, proto)
 
-    def test_bad_port_protos(self):
+    def test_bad_portprotos(self):
         invalids = [(-1,0),      # port nr too small
                     (65536, 0),  # port nr too large
                     (0, -1),     # proto nr too small
@@ -149,13 +179,22 @@ class TestIval_as_pfx(object):
         assert ipf.Ival.from_pfx('any').to_pfx() == '0.0.0.0/0'
         assert ipf.Ival.from_pfx('0.0.0.0/0').to_pfx() == '0.0.0.0/0'
 
-    def test_shorthands(self):
-        assert ipf.Ival.from_pfx('1/8').to_pfx() == '1.0.0.0/8'
-        assert ipf.Ival.from_pfx('1.0/8').to_pfx() == '1.0.0.0/8'
-        assert ipf.Ival.from_pfx('1.0.0/8').to_pfx() == '1.0.0.0/8'
-        assert ipf.Ival.from_pfx('1.0.0.0/8').to_pfx() == '1.0.0.0/8'
+    def test_from_pfx_good(self):
+        cases = [('1/8', '1.0.0.0/8'),
+                 ('1.0/8', '1.0.0.0/8'),
+                 ('1.0.0/8', '1.0.0.0/8'),
+                 ('1.0.0.0/8', '1.0.0.0/8'),
+                 ('0/0', '0.0.0.0/0'),
+                 ('0.0.0.0/0', '0.0.0.0/0'),
+                 ('255.255.255.255/0', '0.0.0.0/0'),
+                 ('255.255.255.255/32', '255.255.255.255'),
+                 ]
 
-    def test_bad_pfx_strings(self):
+        for pfx, proper in cases:
+            assert ipf.Ival.from_pfx(pfx).to_pfx() == proper
+
+
+    def test_from_pfx_bad(self):
         invalids = ['1.0.0.0.0/8',  # too many digits
                     '1.0.0.0./8',   # too many dots
                     '1/',           # missing prefixlength (implied by /)
@@ -174,22 +213,22 @@ class TestIval_as_pfx(object):
 
         for invalid in invalids:
             with pytest.raises(ValueError):
-                print(invalid)
                 ipf.Ival.from_pfx(invalid)
 
     def test_network(self):
         valids = [
             # prefix        network-pfx   network-addr
-            ('1.1.1.43/24', '1.1.1.0/24', '1.1.1.0'),
-            ('1.1.1.250/31', '1.1.1.250/31', '1.1.1.250'),
-            ('1.1.1.251/31', '1.1.1.250/31', '1.1.1.250'),
-            ('1.1.1.251/32', '1.1.1.251', '1.1.1.251'),
+            ('1.1.1.43/24', '1.1.1.0/24', '1.1.1.0', '1.1.1.255'),
+            ('1.1.1.250/31', '1.1.1.250/31', '1.1.1.250', '1.1.1.251'),
+            ('1.1.1.251/31', '1.1.1.250/31', '1.1.1.250', '1.1.1.251'),
+            ('1.1.1.251/32', '1.1.1.251', '1.1.1.251', '1.1.1.251'),
         ]
 
-        for pfx, netpfx, netaddr in valids:
+        for pfx, netpfx, netaddr, bcastaddr in valids:
             ival = ipf.Ival.from_pfx(pfx)
             assert ival.network().to_pfx() == netpfx
             assert ival.network().address() == netaddr
+            assert ival.broadcast().address() == bcastaddr
 
     def test_pfx_summary(self):
         #          pfx-list,  single-summary-prefix
