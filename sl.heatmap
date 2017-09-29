@@ -109,31 +109,34 @@ def read_syslog(fname):
 
     df = df.dropna()
     # From: https://answers.splunk.com/answers/224134/force-displayed-timezone-in-results-to-be-utc-not-1.html
-    # Splunk stores an event's time as an epochtime value, ie as the number of
-    # seconds since 1/1/1970, and no timezone information is stored with it at all.
-    # Before that, as the event is indexed, when a string formatted time is
-    # encountered in the raw data, Splunk of course relies on it's configuration to
-    # tell what timezone it should interpret this string as, before it converts it
-    # to an epochtime value.
     #
-    # Then much later when the event is displayed in the Splunk UI, splunk will at
-    # that moment convert the _time value from epochtime (big number of seconds), to
-    # a string formatted time. Here of course it needs to pick a timezone again and
-    # what it picks is the timezone of the Search Head.
+    # Splunk stores an event's time as an epochtime value, ie as the number of
+    # seconds since 1/1/1970, and no timezone information is stored with it at
+    # all.  Before that, as the event is indexed, when a string formatted time
+    # is encountered in the raw data, Splunk of course relies on it's
+    # configuration to tell what timezone it should interpret this string as,
+    # before it converts it to an epochtime value.
+    #
+    # Then much later when the event is displayed in the Splunk UI, splunk will
+    # at that moment convert the _time value from epochtime (big number of
+    # seconds), to a string formatted time. Here of course it needs to pick a
+    # timezone again and what it picks is the timezone of the Search Head.
     #
     # I think it's worth noting that UTC can sometimes be misinterpreted as a
     # synonym for "epochtime", which it is not. UTC is a timezone, basically GMT
-    # with no daylight saving time ever. Sometimes you'll also come across the idea
-    # that "epochtime is in UTC" which is nonsensical cause an epochtime is just a
-    # number of seconds.
+    # with no daylight saving time ever. Sometimes you'll also come across the
+    # idea that "epochtime is in UTC" which is nonsensical cause an epochtime is
+    # just a number of seconds.
     #
     # Anyway, it's not uncommon for a whole splunk deployment to have everything
-    # including search heads, living in the UTC timezone. In my experience this is
-    # extremely confusing for many of the users, but it does work as advertised; all
-    # displayed times would be in the UTC (ie GMT) timezone.
-    #
-    # Hence, we strip the offset from the time field since we cant use timezones
-    # because the xlsx workbook writer chokes on it.
+    # including search heads, living in the UTC timezone. In my experience this
+    # is extremely confusing for many of the users, but it does work as
+    # advertised; all displayed times would be in the UTC (ie GMT) timezone.
+
+    # Nb: when looking at syslogs of the last 15 mins, the UI timestamps align
+    # with my current wall-clock time, eg 10:15, but exporting to csv yields
+    # 10:15+02:00, which is why args.timestrip is True by default.
+
     if args.timestrip:
         df.time = df.time.str.replace(r'\+.*$', '')
     df.time = pd.to_datetime(df.time)
