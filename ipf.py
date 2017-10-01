@@ -13,10 +13,10 @@ import logging
 import re
 import math
 import json
-
 import pandas as pd
 import numpy as np
 import pytricia as pt
+from itertools import zip_longest
 
 import utils as ut
 
@@ -24,6 +24,8 @@ import utils as ut
 log = logging.getLogger(__name__)
 log.setLevel(logging.WARNING)
 
+# TODO:
+# o search for ip4-protocols/ip4-services in ipf.py's directory, not current dir
 #-- glob
 __version__ = '0.1'
 
@@ -245,11 +247,16 @@ class Ip4Protocol(object):
         'read json encoded ip4-protocol information'
         # {'6': ['tcp', 'Transmission Control'], ..}
 
+        altname = os.path.join(os.path.dirname(__file__), filename)
+        altname = os.path.expanduser(altname)
+        fname = filename if os.path.exists(filename) else altname
+
         try:
-            with open(filename, 'r') as fh:
+            with open(fname, 'r') as fh:
                 dct = json.load(fh)
         except (OSError, IOError) as e:
-            raise IOError('Cannot read {!r}: {!r}'.format(filename, e))
+            raise IOError('Cannot read {!r} or {!r}: {!r}'.format(filename,
+                                                                  altname, e))
 
         self._num_toname = dict((int(k), v[0].lower()) for k, v in dct.items())
         self._num_todesc = dict((int(k), v[1]) for k, v in dct.items())
@@ -259,11 +266,16 @@ class Ip4Protocol(object):
         'load ipv4-services from file created by updta.py'
         # {"995/udp": "pop3s", ..}
 
+        altname = os.path.join(os.path.dirname(__file__), filename)
+        altname = os.path.expanduser(altname)
+        fname = filename if os.path.exists(filename) else altname
+
         try:
-            with open(filename, 'r') as fh:
+            with open(fname, 'r') as fh:
                 dct = json.load(fh)
         except (OSError, IOError) as e:
-            raise IOError('cannot read {!r}: {!r}'.format(filename, e))
+            raise IOError('cannot read {!r} or {!r}: {!r}'.format(filename,
+                                                                  altname, e))
 
         self._port_toservice = dct
         self._service_toports.clear()
@@ -360,12 +372,12 @@ class Ival(object):
         elif self.length == 2**16:
             ports = 'any'
         elif self.length == 1:
-            ports = str(self.start & 0xFF)
+            ports = str(self.start & 0xFFFF)
         else:
             start = self.start & 0xFF
             ports = '{}-{}'.format(start, start + self.length - 1)
 
-        proto = int((self.start & 0xFF0000) // 2**16)
+        proto = int((self.start // 2**16) & 0xFF)
         name = self.ipp.proto_toname(proto)
         return '{}/{}'.format(ports, name)
 
@@ -446,12 +458,17 @@ class Ival(object):
     def from_portproto(cls, port, proto):
         'return port-interval by numbers'
         err = '({}, {}) invalid ipv4 port and/or protocol number'
-        length = 1
+        try:  # accept stringified port,proto nrs and turn 'm into ints
+            port = int(port)
+            proto = int(proto)
+        except ValueError:
+            raise ValueError(err.format(port, proto))
+
         if proto < 0 or proto > 255:
             raise ValueError(err.format(port, proto))
         if port < 0 or port > 2**16 -1:
             raise ValueError(err.format(port, proto))
-        return cls(proto * 2**16 + port, 1)
+        return cls(port + proto * 2**16, 1)
 
     @classmethod
     def from_portstr(cls, portstr):
@@ -581,7 +598,7 @@ class Ip4Filter(object):
         self._dst = pt.PyTricia()  # pfx  -> set([rid's]) - destination ip addr
         self._dpp = pt.PyTricia()  # pfx' -> set([rid's]) - dest. port/protocol
         self._act = {}             # rid -> action (True of False)
-        self._tag = {}             # rid -> tag
+        self._dta = {}             # rid -> dict of additional filter fields (if any)
         self._pp = Ip4Protocol()   # an Ip4Protocol object
         self._nomatch = None       # is returned when filter has no match
         self.filename = filename
@@ -617,7 +634,7 @@ class Ip4Filter(object):
         self._nomatch, oldval = nomatch, self._nomatch
         return oldval
 
-    def add(self, rid, srcs, dsts, ports, action='', tag=''):
+    def add(self, rid, srcs, dsts, ports, action='', dta={}):
         'add a new rule or just add src and/or dst to an existing rule'
         summary = Ival.pfx_summary
         for ival in summary(x.network() for x in map(Ival.from_pfx, srcs)):
@@ -636,14 +653,14 @@ class Ip4Filter(object):
         old = self._act.setdefault(rid, new)
         if old != new:
             self._act[rid] = new
-            print(fmt.format(rid, 'permit', old, new))
+            print(fmt.format(rid, 'action', old, new))
 
-        # only set tag if given, warn if an older, other value exists
-        new = tag if tag else None
-        old = self._tag.setdefault(rid, new) if new else new
-        if old != new:
-            self._tag[rid] = tag
-            print(fmt.format(rid, 'tag', old, new))
+        # always set additional data dict (when it doesn't exist already)
+        old = self._dta.get(rid, None)  # get the old value
+        if old is None:
+            self._dta[rid] = dta            # set the new value
+            if old is not None and old != dta:  # if existing old != new, warn
+                print(fmt.format(rid, 'dta', old, dta))
 
         return True
 
@@ -653,24 +670,25 @@ class Ip4Filter(object):
         self._dst = pt.PyTricia()  # pfx -> set([rid's])
         self._dpp = pt.PyTricai()  # pfx' -> set([rids])
         self._act = {}             # rid -> action (True of False)
-        self._tag = {}             # rid -> tag
 
     def get_rids(self, src, dst, port=None, proto=None):
         'return the set of rule ids matched by session-tuple'
-        if port is None:
-            dpp = None
-        elif proto is None:
-            dpp = Ival.from_portstr(port).to_pfx()
-        else:
-            dpp = Ival.from_portproto(port, proto).to_pfx()
 
         try:
-            # KeyError = no match in a src, dst or dpp table -> empty set
+            if port is None:
+                dpp = None
+            elif proto is None:
+                dpp = Ival.from_portstr(port).to_pfx()
+            else:
+                dpp = Ival.from_portproto(int(port), int(proto)).to_pfx()
             rids = self._dst[dst]
             if dpp is not None:
                 rids = rids.intersection(self._dpp[dpp])
             return rids.intersection(self._src[src])
         except (KeyError, ValueError):
+            return set()
+        except TypeError:  # invalid port, proto
+            print('get rids error on port, proto', port, proto)
             return set()
 
     def match(self, src, dst, port=None, proto=None):
@@ -681,66 +699,113 @@ class Ip4Filter(object):
         # TODO: make it an error is a rule-id is missing from _act
         return self._act.get(min(rids), self._nomatch)
 
-    def tag(self, src, dst, port=None, proto=None):
-        'return tag value of matched rule or the nomatch value'
+    def get(self, src, dst, port=None, proto=None):
+        'return match object of the matching rule or the nomatch value'
         rids = self.get_rids(src, dst, port, proto)
         if len(rids) == 0:
             return self._nomatch
+
         # TODO: make it an error is a rule-id is missing from _act
-        return self._tag.get(min(rids), self._nomatch)
+        return self._dta.get(min(rids), self._nomatch)
 
     def rules(self):
-        'reconstruct the rules in a dict'
-        rules = {}  # {rule_id} -> [ [srcs], [dsts], [ports], action, tag ]
-        for src in self._src.keys():
-            for rsrc in self._src[src]:
-                rules.setdefault(rsrc, [[],[],[],'',''])[0].append(src)
+        'reconstruct the rules in a dict of dicts'
+        # {rule_id} -> {src:[srcs],
+        #               dst:[dsts],
+        #               dport: [ports],
+        #               action: action,
+        #               dta: {dta-dict}
+        #              }
+        rules = {}
+        # note: a PyTricia dict has no items() method
+        for pfx in self._src.keys():
+            ruleset = self._src[pfx]
+            for rulenr in ruleset:
+                dct = rules.setdefault(rulenr, {})
+                dct.setdefault('src', []).append(pfx)
 
-        for dst in self._dst.keys():
-            for rdst in self._dst[dst]:
-                rules.setdefault(rdst, [[],[],[],'',''])[1].append(dst)
+        # by now, rules should have all available rule nrs
+        errfmt = 'Malformed Filter for rule {}'
+        for pfx in self._dst.keys():
+            ruleset = self._dst[pfx]
+            for rulenr in ruleset:
+                dct = rules.setdefault(rulenr, {})
+                if len(dct) == 0:
+                    raise Exception(errfmt.format(rulenr))
+                dct.setdefault('dst', []).append(pfx)
 
         for dpp in self._dpp.keys():
+            ruleset = self._dpp[dpp]
             port = Ival.from_pfx(dpp).to_portstr()
-            for rdpp in self._dpp[dpp]:
-                rules.setdefault(rdpp, [[],[],[],'',''])[2].append(port)
+            for rulenr in ruleset:
+                dct = rules.setdefault(rulenr, {})
+                if len(dct) == 0:
+                    raise Exception(errfmt.format(rulenr))
+                dct.setdefault('dport', []).append(port)
 
-        for r, act in self._act.items():
-            rule = rules.setdefault(r, [[],[],[],'',''])
-            rule[3] = 'permit' if act else 'deny'
+        for rulenr, action in self._act.items():
+            dct = rules.get(rulenr, None)
+            if dct is None:
+                raise Exception(errfmt.format(rulenr))
+            dct['action'] = action
 
-        for r, tag in self._tag.items():
-            rule = rules.setdefault(r, [[],[],[],'',''])
-            rule[4] = tag
+        for rulenr, data in self._dta.items():
+            dct = rules.get(rulenr, None)
+            if dct is None:
+                raise Exception(errfmt.format(rulenr))
+            dct['dta'] = data
 
         # sanitize more specifics in a src/dst list of a rule
         for r, rule in rules.items():
-            summ  = Ival.pfx_summary(map(Ival.from_pfx, rule[0]))
-            rule[0] = [x.to_pfx() for x in summ]
+            summ  = Ival.pfx_summary(map(Ival.from_pfx, rule['src']))
+            rule['src'] = [x.to_pfx() for x in summ]
 
-            summ  = Ival.pfx_summary(map(Ival.from_pfx, rule[1]))
-            rule[1] = [x.to_pfx() for x in summ]
+            summ  = Ival.pfx_summary(map(Ival.from_pfx, rule['dst']))
+            rule['dst'] = [x.to_pfx() for x in summ]
 
             # TODO: minimize port ranges
-            summ = Ival.port_summary(map(Ival.from_portstr, rule[2]))
-            rule[2] = [x.to_portstr() for x in summ]
+            summ = Ival.port_summary(map(Ival.from_portstr, rule['dport']))
+            rule['dport'] = [x.to_portstr() for x in summ]
 
         return rules
 
     def lines(self, csv=False):
         'return filter as lines for printing'
-        fmt = '{},{},{},{},{},{}' if csv else '{:<5} {:21} {:21} {:16} {:7} {}'
-        rules = sorted(self.rules().items())
-        lines = [fmt.format('rule', 'src_ip', 'dest_ip', 'dest_port', 'action', 'tag')]
-        for nr, (srcs, dsts, ports, act, tag) in rules:
-            maxl = max([len(srcs), len(dsts), len(ports)])
+        # {rule_id} -> {src:[srcs],
+        #               dst:[dsts],
+        #               dport: [ports],
+        #               action: action,
+        #               dta: {dta-dict}
+        #              }
+        rules = sorted(self.rules().items())  # rules dict -> ordered [(k,v)]
+        rdct=rules[-1][-1]  # a sample dta dict
+
+        required_fields = 'rule src dst dport action'.split()
+        dta_fields = sorted(rdct.get('dta', {}).keys())  # sorted dta keys
+        dta_fields = [x for x in rdct['dta'].keys() if x not in required_fields]
+
+        fmt = '{},{},{},{},{}' if csv else '{:<5} {:21} {:21} {:16} {:7}'
+        dta_header = ',{}' if csv else ' {:15}'
+        fmt += dta_header * len(dta_fields)
+
+        all_fields = required_fields + dta_fields
+        lines = [fmt.format(*all_fields)]   # csv-header of field names
+        for nr, rule in rules:
+            maxl = max(len(rule['src']), len(rule['dst']), len(rule['dport']))
             for lnr in range(0, maxl):
-                src = srcs[lnr] if lnr < len(srcs) else ''
-                dst = dsts[lnr] if lnr < len(dsts) else ''
-                prt = ports[lnr] if lnr < len(ports) else ''
-                act = act if lnr == 0 else ''
-                tag = tag if lnr == 0 else ''
-                lines.append(fmt.format(nr, src, dst, prt, act, tag))
+                src = rule['src'][lnr] if lnr < len(rule['src']) else ''
+                dst = rule['dst'][lnr] if lnr < len(rule['dst']) else ''
+                prt = rule['dport'][lnr] if lnr < len(rule['dport']) else ''
+                if lnr == 0:
+                    act = 'permit' if rule['action'] else 'deny'
+                else:
+                    act = ''
+                if lnr == 0:
+                    data = [rule['dta'][k] for k in dta_fields]
+                else:
+                    data = [''] * len(dta_fields)
+
+                lines.append(fmt.format(nr, src, dst, prt, act, *data))
                 nr = ''  # only list rule nr on first line
         return lines
 
@@ -760,18 +825,36 @@ class Ip4Filter(object):
 
     def from_csv(self, fname):
         'read ruleset from csv-file'
-        df = ut.load_csv(fname)
-        df['rule'].fillna(method='ffill', inplace=True)
-        df.fillna(value='', inplace=True)
-        df['rule'] = df['rule'].astype(int)
-        for idx, row in df.iterrows():
-            rid = int(row['rule'])
-            srcs = [x.strip() for x in row['src_ip'].split()]
-            dsts = [x.strip() for x in row['dest_ip'].split()]
-            ports = [x.strip() for x in row['dest_port'].split()]
-            act = row['action']
-            tag = row['tag']
-            self.add(rid, srcs, dsts, ports, act, tag)
+        # TODO: check for empty df and presence of required fields
+        inpfile = fname if os.path.isfile(fname) else '{}.csv'.format(fname)
+        df = ut.load_csv(inpfile)
+        if len(df.index) == 0:
+            raise IOError('Ip4Filter cannot read {!r}'.format(fname))
+
+        # checking columns and get superfluous cols into list for later dta dict
+        required_columns = 'rule src dst dport action'.split()
+        missing = [x for x in required_columns if x not in df.columns.values]
+        dta_cols = [x for x in df.columns.values if x not in required_columns]
+        dta_cols.extend(['rule', 'action'])  # add these -> match object
+
+        if len(missing):
+            raise ValueError('Ip4Filter is missing columns {}'.format(missing))
+
+        try:
+            df['rule'].fillna(method='ffill', inplace=True)
+            df.fillna(value='', inplace=True)
+            df['rule'] = df['rule'].astype(int)
+            for idx, row in df.iterrows():
+                rid = int(row['rule'])  # TODO: we did atype(int) already?
+                srcs = [x.strip() for x in row['src'].split()]
+                dsts = [x.strip() for x in row['dst'].split()]
+                ports = [x.strip() for x in row['dport'].split()]
+                act = row['action']
+                dta = row[dta_cols].to_dict()
+                self.add(rid, srcs, dsts, ports, act, dta)
+        except Exception as e:
+            print('oops', repr(e))
+            sys.exit(1)
 
 def parse_args(argv):
     'parse commandline arguments, return arguments Namespace'

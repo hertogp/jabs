@@ -73,7 +73,7 @@ import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from ipf import Ip4Filter
+from ipf import Ip4Filter, Ival
 import utils as ut
 
 #-- Logging
@@ -85,7 +85,7 @@ log.setLevel(logging.WARNING)
 
 #-- Glob
 __version__ = '0.1'
-
+# TODO: remove IPT_MAP, IPF_MAP and use Commander.ipl resp. Commander.ipf caches
 VERBOSE = 0   # verbosity level is zero by default
 IPT_MAP = {}  # ipt[fname] -> ip-table
 IPF_MAP = {}  # ipf[fname] -> ip filter
@@ -452,6 +452,147 @@ class Commander(object):
             self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
 
         self.saved = True
+        return self
+
+    def _dot_hierarchy(self, fields, fh):
+        'create nodes in a hierarchy in dot, if fields > 1'
+
+        if len(fields) > 1:
+            # create hierarchy of subgraphs (clusters)
+            df = self.dfm[fields].sort_values(fields, axis=0)
+            df = df.drop_duplicates(keep='first')
+            df.set_index(fields[:-1], inplace=True)
+            prev, idx = (), ()
+            for idx, row in df.itertuples():
+                idx = idx if isinstance(idx, tuple) else tuple([idx])
+                if prev != idx:
+                    for g in prev:
+                        if g not in idx:
+                            print('}', file=fh)
+                    for n,g in enumerate(idx):
+                        if g not in prev:
+                            print('{}subgraph "cluster_{}" {}'.format('     '*(1+n) ,g, '{'), file=fh)
+                            print('{}label="{}";'.format('     '*(1+n), g), file=fh)
+                    prev = idx
+                print('"{}";'.format(row), file=fh)
+            for g in idx:
+                print('}', file=fh)
+
+        return 0
+
+    def _dot_edges(self, src, dst, label, attrs, fh):
+        'print edges to fh, possibly with edge attributes'
+        # edge = [label, attr1, attr2, ..]
+        # -> turns into [label=label attr1 attr2 ..]
+        cols = [src, dst] + [label] + attrs
+        df = self.dfm[cols]
+        df = df.sort_values(cols, axis=0)
+        df = df.drop_duplicates(keep='first')
+        print('label', label, 'attrs', attrs)
+        for idx, row in df.iterrows():
+            pattrs = []
+            if label is not None:
+                pattrs.append('label="{}"'.format(row[label]))
+            for attr in attrs:
+                pattrs.append(row[attr])
+            pedge = '[{}]'.format(' '.join(pattrs)) if len(pattrs) else ''
+            print('"{}" -> "{}"{};'.format(row[src], row[dst], pedge), file=fh)
+
+    def cmd_dotify(self, lhs, rhs):
+        '''
+        syntax:  fname[,title]=dotify:srcs,dsts[,attrs]
+        info: write a dotfile to file 'fname' using src,dst fields
+        descr:
+          'dotify:' will write a 'fname' file using srcs,dsts to define the
+          graph, possible using attrs to decorate edges.
+
+          `srcs`=[fx^[fy]]^fz  is split on '^' to find 1 or more fields to use
+          as source nodes of the graph.  The last field will create the actual
+          node, any preceeding fields will be used to encapsulate the node in a
+          subgraph named cluster_fy, which is then enclosed in cluster_fx and so
+          on. All fields used in `srcs` must exist in the dataframe.
+
+          `dsts`=[fb^[fc^]]fd  is treated likewise, but for destiation nodes.
+
+          `attrs` is also split on '^' and should list label and/or edge
+          attriutes.
+
+          Example:
+
+          apps.dot,web-traffic=dot:sorg^svpn^src_net,dorg^dvpn^dst_net,service^edge
+
+             This would create source nodes form the src_net df-column, using
+             the svpn and sorg for enveloping.  Likewise for dst_net, dvpn and
+             dorg.  The attrs 'service^edge' takes the 'service' column as label
+             fr edges and puts the 'edge' field as edge attributes, so it should
+             contain values like 'color=blue', i.e. a string listing valid dot
+             edge attributes separated by spaces.
+
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) not in (1, 2):
+            errors.append('need 1 or 2 lhs fields')
+        if len(rhs) not in (2,3):
+            errors.append('need 2 or 3 rhs fields')
+        self.fatal(errors, lhs, rhs)
+
+        # decompose rhs and check for errors
+        srcs = list(filter(None, rhs[0].split('^')))
+        self.check_fields(errors, srcs)
+
+        dsts = list(filter(None, rhs[1].split('^')))
+        self.check_fields(errors, dsts)
+
+        if len(rhs) == 3:
+            label, *attrs = rhs[2].split('^')
+            print('label', label)
+            if len(label):
+                self.check_fields(errors, [label])
+            else:
+                label = None
+
+            attrs = list(filter(None, attrs))
+            if len(attrs):
+                print('attrs', attrs)
+                self.check_fields(errors, attrs)
+            else:
+                attrs = None
+
+        self.fatal(errors, lhs, rhs)
+
+        log.debug('writing dot file {!r}'.format(lhs, rhs[0]))
+        log.debug('source columns {}'.format(srcs))
+        log.debug('destination columns {}'.format(dsts))
+
+        fname = lhs[0]
+        title = None if len(lhs) == 1 else lhs[1]
+        fh = open(fname, 'wt') if len(fname) else sys.stdout
+        # fh = sys.stdout
+        # standard header
+        print('digraph dfm {', file=fh)
+        print('    overlap=scale;', file=fh)
+        print('    ranksep="1.5 equally";', file=fh)
+        print('    rankdir=LR;', file=fh)
+        if title is not None:
+            print('    labelloc="t";', file=fh)
+            print('    label="{}";'.format(title), file=fh)
+
+        self._dot_hierarchy(srcs, fh)
+        self._dot_hierarchy(dsts, fh)
+        self._dot_edges(srcs[-1], dsts[-1], label, attrs, fh)
+
+        print('}', file=fh)  # close the digraph
+
+        if fh != sys.stdout:
+            fh.close()
+
+        try:
+            pass
+        except (TypeError, ValueError) as e:
+            errors.append('runtime error {!r}'.format(e))
+            self.fatal(errors, lhs, rhs)
+
         return self
 
     def cmd_help(self, lhs, rhs):
@@ -821,6 +962,52 @@ class Commander(object):
 
         return self
 
+    def cmd_portstr(self, lhs, rhs):
+        '''
+        syntax: fx=port:fy,fz
+        info: turn fy,fyz (port, protocol numbers, eg 80,6) into a portstring like 80/tcp
+        descr:
+           Sometimes is better to get just port, protocol nr from the logs and
+           convert those to a ipv4-port/service using the iana assigned numbers.
+           portstr: does exactly that.
+
+           Example:
+           dfm r:logs service=port:port,proto
+
+           The above will create/overwrite columns 'service' with a port string
+           constructed from the port number and protocol number:
+
+              service,port,proto
+              80/tcp,"80","6"
+              53/udp,53,17
+
+        '''
+
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) != 1:
+            errors.append('need exactly 1 lhs field')
+        if len(rhs) !=2:
+            errors.append('need exactly 2 rhs fields')
+        dst = lhs[0]
+        self.check_fields(errors, rhs)
+        self.fatal(errors, lhs, rhs)
+        fport, fproto = rhs
+
+        def safe_port(row):
+            try:
+                port, proto = row[fport], row[fproto]
+                return Ival.from_portproto(port, proto).to_portstr()
+            except ValueError:
+                return np.nan
+
+        try:
+            self.dfm[dst] = self.dfm.apply(safe_port, axis=1)
+        except Exception as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        return self
+
     def cmd_join(self, lhs, rhs):
         '''
         syntax: fx=join:sep,fy,fz,..
@@ -952,7 +1139,7 @@ class Commander(object):
         self.check_fields(errors, rhs[:-1])
         self.fatal(errors, lhs, rhs)
 
-        expression, rhs = rhs[-1], rhs[0:-1]
+        expression = rhs.pop()
         parts = re.split('(/)', expression)  # keep delim / in parts
         delim = parts[1::2]                  # either 2 or 3 /'s are valid!
         terms = list(parts[::2])
@@ -962,6 +1149,7 @@ class Commander(object):
             errors.append('- expected 2 or 3 /\'s in the expression ..')
             self.fatal(errors, lhs, rhs)
 
+        rgx_inverse = False
         flags = 0
         for f in terms[-1]:
             f = f.lower()
@@ -973,6 +1161,8 @@ class Commander(object):
                 flags |= re.S
             elif f == 'm':
                 flags |= re.M
+            elif f == 'r':
+                rgx_inverse = True
             else:
                 errors.append('regexp, unknown flag in {!r}'.format(f))
         if len(errors):
@@ -985,12 +1175,18 @@ class Commander(object):
             if len(rhs) == 0:
                 # f1[,f2,..]~/expr/ -> rows where expr matches 1 of f1[f2,..]
 
-                self.check_fields(errors, lhs)
+                self.check_fields(errors, lhs)  # ensure lhs-fields exist
                 self.fatal(errors, lhs, rhs)
                 log.info("- filter rows by re.search on '{}'".format(lhs))
                 n1 = len(self.dfm.index)
-                self.dfm = self.dfm[self.dfm[lhs].apply(
-                    lambda r: any(rgx.search(str(f)) for f in r), axis=1)]
+
+                if rgx_inverse:
+                    match = lambda r: any(not rgx.search(str(f)) for f in r)
+                else:
+                    match = lambda r: any(rgx.search(str(f)) for f in r)
+
+                self.dfm = self.dfm[self.dfm[lhs].apply(match, axis=1)]
+
                 n2 = len(self.dfm.index)
                 fmt = 'filtering {!r}: {} -> {} rows (delta {})'
                 log.info(fmt.format(lhs, n1, n2, n1-n2))
@@ -1002,10 +1198,13 @@ class Commander(object):
                     self.fatal(errors, lhs, rhs)
                 src = rhs[0]
                 log.info('- {}={} when re.search matches'.format(lhs, src))
-                nomatch = np.nan
 
-                newcol = self.dfm[src].apply(
-                    lambda x: x if rgx.search(str(x)) else nomatch)
+                if rgx_inverse:
+                    match = lambda x: str(x) if not rgx.search(str(x)) else np.nan
+                else:
+                    match = lambda x: str(x) if rgx.search(str(x)) else np.nan
+
+                newcol = self.dfm[src].apply(match)
                 for dst in lhs:
                     self.dfm[dst] = newcol
                     log.info('- {} new {} fields filled'.format(len(
@@ -1013,7 +1212,7 @@ class Commander(object):
 
         elif len(delim) == 3:
             # [f1=]f2~/expr/repl/[flags]  to replace in f2 and/or assign to f1
-            # f1,f2=f3~/expr/repl   vs  f1,f2~/expr/repl/
+            # when substituting, rgx_inverse flag cannot be used
             repl = terms[2]
             if len(rhs) == 0:
                 srcs = lhs
@@ -1021,12 +1220,13 @@ class Commander(object):
                 srcs = rhs * len(lhs)
             else:
                 errors.append('max 1 rhs field allowed')
-                self.fatal(errors, lhs, rhs + [expression])
+                # self.fatal(errors, lhs, rhs + [expression]) # why so early?
 
             self.check_fields(errors, srcs)
+            if rgx_inverse:
+                errors.append('cannot use reverse-flag when substituting')
             self.fatal(errors, lhs, rhs + [expression])
 
-            print(self.dfm.dtypes)
             for src,dst in zip(srcs,lhs):
                 log.info('- {}={}.sub({},{!r})'.format(dst, rgx, src, repl))
                 self.dfm[dst] = self.dfm[src].apply(
@@ -1308,14 +1508,16 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
 
         table, src, *getfields = rhs
+        # TODO: use self.ipf instead of global hash
+        #
         # get cached table, or read from disk
         ipt = IPT_MAP.get(table, None)
         if ipt is None:
-            log.info('reading {} from disk'.format(table))
-            ipt = load_ipt(table)
+            log.info('reading {!r} from disk'.format(table))
+            ipt = ut.load_ipt(table)
             IPT_MAP[table] = ipt
         else:
-            log.info('table {} retrieved from cache'.format(table))
+            log.info('table {!r} retrieved from cache'.format(table))
         log.info('table {} has {} entries'.format(table, len(table)))
 
         # sanity check ip lookup table
@@ -1406,7 +1608,9 @@ class Commander(object):
         # if port is None, then proto must be None as well
         ipfilter, src, dst, port, proto = (rhs + [None, None])[0:5]
         # get cached filter, or read from disk
+        # TODO: use self.ipf instead of global hash
         ipf = IPF_MAP.get(ipfilter, None)
+
         if ipf is None:
             log.info('reading {} from disk'.format(ipfilter))
             ipf = Ip4Filter(ipfilter)
@@ -1414,11 +1618,15 @@ class Commander(object):
         else:
             log.info('filter retrieved from cache')
         log.info('filter {} has {} rules'.format(ipfilter, len(ipf)))
-
         # sanity check ip filter
         if len(ipf) == 0:
             errors.append('filter appears to be empty, no rules')
         self.fatal(errors, lhs, rhs)
+
+        if args.log_level == logging.DEBUG:
+            for line in ipf.lines():
+                log.debug(line)
+
         nomatch = '' if dest_field else False   # tag empty string for a miss
         old_nomatch = ipf.set_nomatch(nomatch)  # nomatch => filter session out
         ipfunc = ipf.tag if dest_field else ipf.match
@@ -1432,20 +1640,116 @@ class Commander(object):
                 else:  # port, proto are nrs, eg 80, 17
                     return ipfunc(row[src], row[dst], row[port], row[proto])
             except Exception as e:
-                self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+                self.fatal(['runtime error1: {!r}'.format(e)], lhs, rhs)
 
-        try:
-            if dest_field:
-                self.dfm[dest_field] = self.dfm.apply(match, axis=1)
-            else:
-                self.dfm = self.dfm[self.dfm.apply(match, axis=1)]
+        # try:
+        if dest_field:
+            self.dfm[dest_field] = self.dfm.apply(match, axis=1)
+        else:
+            self.dfm = self.dfm[self.dfm.apply(match, axis=1)]
 
-        except (KeyError, ValueError) as e:
-            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
-        except Exception as e:
-            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+        # except (KeyError, ValueError) as e:
+        #     self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
 
         ipf.set_nomatch(old_nomatch)  # restore old nomatch value
+        return self
+
+    def cmd_ipfget(self, lhs, rhs):
+        '''
+        syntax: fx,..=ipfget:filter[.csv],src,dst,service,g1,..
+        info: get filter data-fields gx,.. and assign to fx,..
+
+        descr:
+           'ipfget:' loads the rule-set given by filter.csv and uses the listed
+           src,dst,service fields to try and match them against the filter.  The
+           filter is cached in case the same filter is used again later on.
+
+           Any existing lhs-fields will be overwritten and created otherwise.
+
+           The rhs-fields must specify the columns to use for src ip,
+           destination ip en service, followed by the fields to retrieve from
+           the match-data as specified by the ipf-filter.  All rhs-fields must
+           exist, either in the dataframe (the first 3) or in het match object
+           returned by the filter.
+
+           An ipf filter is a csv file with mandatory fields:
+           rule,src,dst,dport,action followed by optional data fields.
+
+           The optional data fields can be retrieved using ipfget:
+
+             |-- required filter fields ---------|-- data fields --
+             rule,src_ip,dest_ip,dest_port,action,tag,attr
+             1,10/8,10.10.10.10,80/tcp,permit,intranet1,color=green
+             2,10/8,10.10.10.11,5000-6000/tcp,deny,drop-rule1,color=red
+             ,10/8,10.10.10.12,,,,
+             3,any,any,any,deny,generic-drop,color=blue
+
+          tag,attr=ipfget:file.csv,tag,attr
+
+          will create/overwrite two columns listing the values of tag,attr
+          listed in the filter for the matching rule.
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) < 1:
+            errors.append('need 1+ lhs field')
+        if len(rhs) != len(lhs) + 4:
+            errors.append('rhs-fields must specifiy:')
+            errors.append('- a filter file')
+            errors.append('- a src ip field')
+            errors.append('- a dst ip field')
+            errors.append('- a dport/service field')
+            errors.append('- followed by dta-fields (to assign to lhs-fields')
+            errors.append('got {!r} instead'.format(rhs))
+        if not (os.path.isfile(rhs[0]) or
+                os.path.isfile('{}.csv'.format(rhs[0]))):
+            errors.append('cannot find ipf filter {!r} on disk'.format(rhs[0]))
+        self.check_fields(errors, rhs[1:4])  # fields for src,dst,dport must exist
+        self.fatal(errors, lhs, rhs)
+
+        # decompose rhs
+        ipfilter, src, dst, dport, dta_fields = rhs[0], rhs[1], rhs[2], rhs[3], rhs[4:]
+        ipf = IPF_MAP.get(ipfilter, None)
+        if ipf is None:
+            log.info('reading {} from disk'.format(ipfilter))
+            ipf = Ip4Filter(ipfilter)
+            IPF_MAP[ipfilter] = ipf
+        else:
+            log.info('filter retrieved from cache')
+        log.info('filter {} has {} rules'.format(ipfilter, len(ipf)))
+        if len(ipf) == 0:  # check ipf is valid
+            errors.append('filter appears to be empty, no rules')
+        self.fatal(errors, lhs, rhs)
+
+        if args.log_level == logging.DEBUG:
+            for line in ipf.lines():
+                log.debug(line)
+
+        def match(row):
+            try:
+                dct = ipf.get(row[src], row[dst], row[dport])
+                if dct is None:
+                    return pd.Series(['err'] * len(dta_fields))
+                return pd.Series([dct.get(k, 'err') for k in dta_fields])
+
+            except Exception as e:
+                errors.append('matched data has keys {}'.keys())
+                errors.append('requested fields were {}'.dta_fields)
+                errors.append('looks like some are missing in the filter data')
+                errors.append('error: {}'.format(repr(e)))
+                self.fatal(errors, lhs, rhs)
+
+        # self.dfm[lhs] = self.dfm.apply(match, axis=1)
+
+        def lookup(row):
+            dct = ipf.get(row[src], row[dst], row[dport])
+            if dct is None:
+                return ''
+            return dct.get(dta_field, 'err')
+
+        for dst_field, dta_field in zip(lhs, dta_fields):
+            self.dfm[dst_field] = self.dfm.apply(lookup, axis=1)
+
         return self
 
 
@@ -1457,6 +1761,17 @@ def main():
         hdlr.run('help', [], ['dfm'])
         return 0
 
+    # run any help commands and exit
+    helpwanted = False
+    for org, cmd, lhs, rhs in args.cmds:
+        if cmd != 'help':
+            continue
+        helpwanted = True
+        hdlr.run(cmd, lhs, rhs)
+    if helpwanted:
+        sys.exit(0)
+
+    # run the real data mangling commands
     for org, cmd, lhs, rhs in args.cmds:
         log.debug('cli {!r}'.format(org))
         try:
@@ -1468,8 +1783,8 @@ def main():
                 log.warn('Oops, runtime error {}'.format(e))
             sys.exit(1)
 
-    # if last command is not a write, write to stdout
-    if not args.cmds[-1][1] in ['w', 'write', 'show']:
+    # gratutious output to stdout if not output cmd was seen
+    if not args.cmds[-1][1] in ['w', 'write', 'show', 'dot']:
         hdlr.run('write', [], [])
 
     return 0

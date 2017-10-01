@@ -160,6 +160,13 @@ class TestIval_as_portproto(object):
         for port, proto in valids:
             ipf.Ival.from_portproto(port, proto)
 
+    def test_known_port_protos(self):
+        assert '80/tcp' == ipf.Ival.from_portproto(80, 6).to_portstr()
+        print(ipf.Ival.from_portproto(3216,6))
+        print(ipf.Ival.from_portstr('3216/tcp').values())
+        assert ipf.Ival.from_portproto(3216, 6) == ipf.Ival.from_portstr('3216/tcp')
+        assert '3216/tcp' == ipf.Ival.from_portproto(3216, 6).to_portstr()
+
     def test_bad_portprotos(self):
         invalids = [(-1,0),      # port nr too small
                     (65536, 0),  # port nr too large
