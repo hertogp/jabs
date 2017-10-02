@@ -73,7 +73,7 @@ import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from ipf import Ip4Filter, Ival
+from ipf import Ip4Protocol, Ip4Filter, Ival
 import utils as ut
 
 #-- Logging
@@ -1003,6 +1003,63 @@ class Commander(object):
 
         try:
             self.dfm[dst] = self.dfm.apply(safe_port, axis=1)
+        except Exception as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        return self
+
+    def cmd_servicename(self, lhs, rhs):
+        '''
+        syntax: fx=service:fportstr
+        info: fx := iana service name via portstring
+        descr:
+           Looks up the portstring (eg 80/tcp) or port,protocols nrs (eg 80, 6)
+           in a table and returns the iana assigned name and/or description.
+
+           Example:
+           dfm r:logs application,descr=portname:service
+           dfm r:logs ,descr=portname:service
+
+           dfm r:logs application,descr=portname:port,proto
+           dfm r:logs ,descr=portname:port,proto
+
+           The first command assigns the iana service name and its description
+           to (possibly) new fields application,descr using the df-column
+           service which should contain portstrings like '80/tcp'.  The second
+           command only assigns the description.
+
+           The 3rd and 4th commands do the same, but using port nr and protocol
+           nr columns instead (where port, proto would refer to eg 80, 6).
+
+        '''
+
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) > 2:
+            errors.append('need 1 or 2 lhs fields')
+        if len(rhs) < 1 or len(rhs) > 2:
+            errors.append('need 1 or 2 rhs fields')
+        self.check_fields(errors, rhs)
+        self.fatal(errors, lhs, rhs)
+        log.info('loading services ...')
+        ipp = Ip4Protocol(load_services=True)
+        log.info('... done!')
+        fdst, fport = lhs[0], rhs[0]
+
+        def get_name(row):
+            try:
+                portstr = row[fport]
+                if portstr is not np.nan and len(portstr):
+                    name = ipp.service_byport(portstr)
+                    if name is None or len(name) == 0:
+                        return portstr
+                    return name
+                return 'unknown'
+            except ValueError:
+                return 'err'
+
+        try:
+            self.dfm[fdst] = self.dfm.apply(get_name, axis=1)
         except Exception as e:
             self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
 

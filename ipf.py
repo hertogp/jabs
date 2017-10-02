@@ -311,9 +311,8 @@ class Ip4Protocol(object):
     def service_byport(self, portstr):
         'turn port string into its associated service name'
         err = 'invalid ipv4 protocol port string'
-        rv = self._port_toservice(portstr.lower(), None)
-        if rv is None:
-            raise ValueError(err.format(name))
+        rv = self._port_toservice.get(portstr.lower(), '')
+        return rv
 
 
     def set_service(self, service, portstrings):
