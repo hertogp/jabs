@@ -484,14 +484,20 @@ class Commander(object):
         'print edges to fh, possibly with edge attributes'
         # edge = [label, attr1, attr2, ..]
         # -> turns into [label=label attr1 attr2 ..]
-        cols = [src, dst] + [label] + attrs
+        attrs = [] if attrs is None else attrs
+        label = '' if label is None else label
+
+        cols = [src, dst]
+        if len(label):
+            cols.append(label)
+        if len(attrs):
+            cols.extend(attrs)
         df = self.dfm[cols]
         df = df.sort_values(cols, axis=0)
         df = df.drop_duplicates(keep='first')
-        print('label', label, 'attrs', attrs)
         for idx, row in df.iterrows():
             pattrs = []
-            if label is not None:
+            if label is not None and len(label):
                 pattrs.append('label="{}"'.format(row[label]))
             for attr in attrs:
                 pattrs.append(row[attr])
@@ -544,9 +550,9 @@ class Commander(object):
         dsts = list(filter(None, rhs[1].split('^')))
         self.check_fields(errors, dsts)
 
+        label=''
         if len(rhs) == 3:
             label, *attrs = rhs[2].split('^')
-            print('label', label)
             if len(label):
                 self.check_fields(errors, [label])
             else:
@@ -554,7 +560,6 @@ class Commander(object):
 
             attrs = list(filter(None, attrs))
             if len(attrs):
-                print('attrs', attrs)
                 self.check_fields(errors, attrs)
             else:
                 attrs = None
@@ -1037,8 +1042,8 @@ class Commander(object):
         errors = []
         if len(lhs) > 2:
             errors.append('need 1 or 2 lhs fields')
-        if len(rhs) < 1 or len(rhs) > 2:
-            errors.append('need 1 or 2 rhs fields')
+        if len(rhs) != 1:
+            errors.append('need 1 rhs field')
         self.check_fields(errors, rhs)
         self.fatal(errors, lhs, rhs)
         log.info('loading services ...')
@@ -1686,7 +1691,7 @@ class Commander(object):
 
         nomatch = '' if dest_field else False   # tag empty string for a miss
         old_nomatch = ipf.set_nomatch(nomatch)  # nomatch => filter session out
-        ipfunc = ipf.tag if dest_field else ipf.match
+        ipfunc = ipf.get if dest_field else ipf.match
 
         def match(row):
             try:
@@ -1714,7 +1719,7 @@ class Commander(object):
     def cmd_ipfget(self, lhs, rhs):
         '''
         syntax: fx,..=ipfget:filter[.csv],src,dst,service,g1,..
-        info: get filter data-fields gx,.. and assign to fx,..
+        info: get filter match object w/ data-fields gx,.. and assign to fx,..
 
         descr:
            'ipfget:' loads the rule-set given by filter.csv and uses the listed
@@ -1724,10 +1729,11 @@ class Commander(object):
            Any existing lhs-fields will be overwritten and created otherwise.
 
            The rhs-fields must specify the columns to use for src ip,
-           destination ip en service, followed by the fields to retrieve from
-           the match-data as specified by the ipf-filter.  All rhs-fields must
+           destination ip and service, followed by the fields to retrieve from
+           the match object as specified by the ipf-filter.  All rhs-fields must
            exist, either in the dataframe (the first 3) or in het match object
-           returned by the filter.
+           returned by the filter.  So its handy if the extra datafields of the
+           filter are known (see below).
 
            An ipf filter is a csv file with mandatory fields:
            rule,src,dst,dport,action followed by optional data fields.
@@ -1741,10 +1747,7 @@ class Commander(object):
              ,10/8,10.10.10.12,,,,
              3,any,any,any,deny,generic-drop,color=blue
 
-          tag,attr=ipfget:file.csv,tag,attr
-
-          will create/overwrite two columns listing the values of tag,attr
-          listed in the filter for the matching rule.
+          my_tag,my_attr=ipfget:file.csv,src,dst,service,tag,attr
         '''
         # sanity check lhs, rhs
         errors = []
@@ -1841,7 +1844,7 @@ def main():
             sys.exit(1)
 
     # gratutious output to stdout if not output cmd was seen
-    if not args.cmds[-1][1] in ['w', 'write', 'show', 'dot']:
+    if not args.cmds[-1][1] in ['w', 'write', 'show', 'dotify']:
         hdlr.run('write', [], [])
 
     return 0
