@@ -85,10 +85,6 @@ log.setLevel(logging.WARNING)
 
 #-- Glob
 __version__ = '0.1'
-# TODO: remove IPT_MAP, IPF_MAP and use Commander.ipl resp. Commander.ipf caches
-VERBOSE = 0   # verbosity level is zero by default
-IPT_MAP = {}  # ipt[fname] -> ip-table
-IPF_MAP = {}  # ipf[fname] -> ip filter
 
 #-- CMD Registry
 
@@ -132,7 +128,6 @@ def log_switch(logger_lvl=None, console_lvl=None, console_fmt=None):
 
 def parse_args(argv):
     'parse commandline arguments, return arguments Namespace'
-    global VERBOSE
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__)
@@ -1185,6 +1180,7 @@ class Commander(object):
           /a = re.A - ascii-only matching instead of full unicode for \w, \W ..
           /s = re.S - make '.' match newline as well
           /m = re.M - make '^','$' also match at beginning/end of each line
+          /r = reverse meaning in case of matching/filtering
         '''
         # regexp work on strings, not numbers. At the moment, str(x) is used to
         # ensure a column field value is a string.  Not needed when its already
@@ -1205,12 +1201,6 @@ class Commander(object):
         parts = re.split('(/)', expression)  # keep delim / in parts
         delim = parts[1::2]                  # either 2 or 3 /'s are valid!
         terms = list(parts[::2])
-
-        if len(delim) not in [2,3]:
-            errors.append('syntax error in {!r}'.format(expression))
-            errors.append('- expected 2 or 3 /\'s in the expression ..')
-            self.fatal(errors, lhs, rhs)
-
         rgx_inverse = False
         flags = 0
         for f in terms[-1]:
@@ -1230,7 +1220,13 @@ class Commander(object):
         if len(errors):
             self.fatal(errors, lhs, rhs)
 
-        rgx = re.compile(terms[1], flags)
+        try:
+            rgx = re.compile(terms[1], flags)
+        except Exception as e:
+            errors.append('Failed to compile expression {!}'.format(expression))
+            errors.append(' - error: {}'.format(repr(e)))
+            self.fatal(errors, lhs, rhs)
+
         log.info('- {!r}'.format(rgx))
 
         if len(delim) == 2:
@@ -1310,7 +1306,7 @@ class Commander(object):
 
           Example:
           color=in:green,yellow  - keep only the green or yellow ones
-          f1,f2=in:apple,pear - keep rows with either apple or pear in f1 or f2
+          f1,f2=in:apple,pear - keep rows with apple and/or pear in f1 or f2
 
         '''
         # sanity check lhs, rhs
@@ -1570,17 +1566,15 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
 
         table, src, *getfields = rhs
-        # TODO: use self.ipf instead of global hash
-        #
         # get cached table, or read from disk
-        ipt = IPT_MAP.get(table, None)
+        ipt = self.ipt.get(table, None)
         if ipt is None:
             log.info('reading {!r} from disk'.format(table))
             ipt = ut.load_ipt(table)
-            IPT_MAP[table] = ipt
+            self.ipt[table] = ipt
         else:
             log.info('table {!r} retrieved from cache'.format(table))
-        log.info('table {} has {} entries'.format(table, len(table)))
+        log.info('- table {} has {} entries'.format(table, len(ipt.keys())))
 
         # sanity check ip lookup table
         if len(ipt) < 1:
@@ -1670,13 +1664,11 @@ class Commander(object):
         # if port is None, then proto must be None as well
         ipfilter, src, dst, port, proto = (rhs + [None, None])[0:5]
         # get cached filter, or read from disk
-        # TODO: use self.ipf instead of global hash
-        ipf = IPF_MAP.get(ipfilter, None)
-
+        ipf = self.ipf.get(ipfilter, None)
         if ipf is None:
             log.info('reading {} from disk'.format(ipfilter))
             ipf = Ip4Filter(ipfilter)
-            IPF_MAP[ipfilter] = ipf
+            self.ipf[ipfilter] = ipf
         else:
             log.info('filter retrieved from cache')
         log.info('filter {} has {} rules'.format(ipfilter, len(ipf)))
@@ -1758,7 +1750,7 @@ class Commander(object):
             errors.append('- a filter file')
             errors.append('- a src ip field')
             errors.append('- a dst ip field')
-            errors.append('- a dport/service field')
+            errors.append('- a dst port field (eg 80/tcp')
             errors.append('- followed by dta-fields (to assign to lhs-fields')
             errors.append('got {!r} instead'.format(rhs))
         if not (os.path.isfile(rhs[0]) or
@@ -1769,11 +1761,11 @@ class Commander(object):
 
         # decompose rhs
         ipfilter, src, dst, dport, dta_fields = rhs[0], rhs[1], rhs[2], rhs[3], rhs[4:]
-        ipf = IPF_MAP.get(ipfilter, None)
+        ipf = self.ipf.get(ipfilter, None)
         if ipf is None:
             log.info('reading {} from disk'.format(ipfilter))
             ipf = Ip4Filter(ipfilter)
-            IPF_MAP[ipfilter] = ipf
+            self.ipf[ipfilter] = ipf
         else:
             log.info('filter retrieved from cache')
         log.info('filter {} has {} rules'.format(ipfilter, len(ipf)))
