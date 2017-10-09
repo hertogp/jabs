@@ -158,7 +158,7 @@ def cmd_tokens(command):
 
 
 def cmd_str(cmd, lhs, rhs):
-    'reconstruct factual cli command from basic fields'
+    'reconstruct actual cli command from basic fields'
     lhs = [] if lhs is None else lhs
     rhs = [] if rhs is None else rhs
     return '{}={}:{}'.format(','.join(lhs), cmd, ','.join(rhs))
