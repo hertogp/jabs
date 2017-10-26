@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 '''
-ipf - ip filter
-
-  ipf filters or tags (src_ip, dest_ip, dest_port)-combinations on its stdin'
-
+ilf - ip log filter
+  module to filter logged ip traffic, need src/dst[service or port,proto]
 '''
 
 import os

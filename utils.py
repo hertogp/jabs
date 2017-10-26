@@ -245,7 +245,7 @@ def dotq2uint(dotq):
     try:
         x = list(map(int, dotq.split('.')))
         for d in x:
-            if 0 < d  or d > 255:
+            if d < 0  or d > 255:
                 raise ValueError('{!r} invalid dotquad'.format(dotq))
         if len(x) > 4:
             raise ValueError('{!r} invalid dotquad'.format(dotq))

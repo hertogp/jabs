@@ -73,7 +73,7 @@ import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from ipf import Ip4Protocol, Ip4Filter, Ival
+from ilf import Ip4Protocol, Ip4Filter, Ival
 import utils as ut
 
 #-- Logging
