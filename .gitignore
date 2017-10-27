@@ -5,6 +5,8 @@
 *.so
 *.swp
 _notes.md
+parser.out
+parsetab.py
 
 ## Unit test / coverage reports
 .coverage

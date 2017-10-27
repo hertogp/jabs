@@ -326,6 +326,7 @@ def ast_expand(ast):
     'expand include-statements in-place'
     # replace include(file) with its ast, in-place and continue expanding
     # in case of error, replace include-statement with (ERROR, msg)-statement
+    # included file's path is relative to the path of the including file.
     seen = set([])
     idx = -1
 
@@ -456,7 +457,7 @@ def ast_group_org(ast, group, _seen=None):
 
 if __name__ == '__main__':
 
-    ast = parsefile('my.ilf')
+    ast = parsefile('scr/my.ilf')
     for stmt in ast:
         print(stmt)
 
