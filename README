@@ -16,7 +16,7 @@ on a regex.  Rows can be filtered using a regex on columns or an ip filter.
 
 o 2do traffic patterns can be tagged using cmd: f=tag:rulebase,src,dst[,port]
 
-## ipf - ip  filter
+## ilf - ip log filter
 
 Helper module used by dfm for ip filtering using a firewall-like rulebase with
 src,dst,port,action,tag.
