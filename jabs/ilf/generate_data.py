@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 
 __version__ = '0.1'
-#-- logging
+
 log = logging.getLogger(__name__)
 log.setLevel(logging.WARNING)
 
@@ -19,7 +19,7 @@ URL_PROTOCOLS = '{}/protocol-numbers/protocol-numbers-1.csv'.format(URL_BASE)
 URL_SERVICES = '{}/service-names-port-numbers/service-names-port-numbers.csv'.format(URL_BASE)
 
 def console_logging(log_level):
-    'setup console logging to level given by args.v'
+    'set console logging to level given by args.v'
     console_fmt = logging.Formatter('%(funcName)s %(levelname)s: %(message)s')
     console_hdl = logging.StreamHandler(stream=sys.stderr)
     console_hdl.set_name('console')
@@ -29,7 +29,7 @@ def console_logging(log_level):
     log.addHandler(console_hdl)
 
 def load_csv(url):
-    'load a csv into a df and normalize columns name somewhat'
+    'load a csv into a df and normalize column names somewhat'
     df = pd.read_csv(url)
     df.columns = df.columns.str.lower()
     df.columns = df.columns.str.replace(r'\s+', '_')
@@ -37,8 +37,7 @@ def load_csv(url):
     return df
 
 def load_protocols(url):
-    'load protocol numbers from iana and prep a ip4-protocols.csv file'
-    # get & prep IPv4 protocol names
+    'load protocol numbers from iana'
     try:
         df = load_csv(url)
         cols = 'decimal keyword protocol'.split()
@@ -88,8 +87,7 @@ def load_protocols(url):
     return df
 
 def load_services(url, fname):
-    'load ip4 services from iana and prep ip4-services.csv file'
-
+    'load ip4 services from iana'
     cols = 'port_number transport_protocol service_name'.split()
     df = load_csv(URL_SERVICES)
     log.info('keep only columns {!r}'.format(cols))
@@ -128,21 +126,20 @@ def protocol_topy(df, fh):
     dd = df.set_index('decimal')
     dd = dd.drop_duplicates()
     dct = dict(zip(dd.index, zip(dd['keyword'], dd['protocol'])))
-    print("\n", file=fh)
+    print("", file=fh)
     print('IP4PROTOCOLS = {', file=fh)
     for k, v in sorted(dct.items()):
         print('    {}: {},'.format(k, v), file=fh)
     print('}', file=fh)
     log.info('wrote {} protocol numbers to {}'.format(len(dct), fh.name))
 
-
 def services_topy(df, fh):
-    'write ip4services.p'
+    'write services dict'
     dd = df.copy()
     pt = 'port_number transport_protocol'.split()
     dd['port'] = dd[pt].apply(lambda g: '/'.join(x for x in g), axis=1)
     dct = dict(zip(dd['port'], dd['service_name']))
-    print("\n", file=fh)
+    print("", file=fh)
     print('IP4SERVICES = {', file=fh)
     for k,v in sorted(dct.items()):
         print('    {!r}: {!r},'.format(k, v), file=fh)
@@ -150,7 +147,7 @@ def services_topy(df, fh):
     log.info('wrote {} service entries to {}'.format(len(dct), fh.name))
 
 def parse_args(argv):
-    'parse commandline arguments, return arguments Namespace'
+    'parse command line arguments'
     p = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__)
@@ -178,12 +175,11 @@ def main():
         print('Data retrieved from:', file=outf)
         print(' - {}'.format(URL_PROTOCOLS), file=outf)
         print(' - {}'.format(URL_SERVICES), file=outf)
-        print("'''\n\n", file=outf)
+        print("'''", file=outf)
 
         log.info('retrieving protocols, url {}'.format(URL_PROTOCOLS))
         dfp = load_protocols(URL_PROTOCOLS)
         protocol_topy(dfp, outf)
-        print('\n', file=outf)
         log.info('retrieving services, url {}'.format(URL_SERVICES))
         dfs = load_services(URL_SERVICES, 'dta/ip4-services.csv')
         services_topy(dfs, outf)
