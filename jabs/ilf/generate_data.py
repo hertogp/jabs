@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 '''
-helper module to update data in dta subdir
-
-usage: ./updta.py
- - loads ip4 protocol numbers from iana
- - loads ip4 services from iana
+Helper script to retrieve IPv4 protocols & services from IANA and write data.py
 '''
 
 import sys
 import argparse
 import logging
-import json
 import pandas as pd
 import numpy as np
 
@@ -19,8 +14,9 @@ __version__ = '0.1'
 log = logging.getLogger(__name__)
 log.setLevel(logging.WARNING)
 
-URL_PROTOCOLS = 'https://www.iana.org/assignments/protocol-numbers/protocol-numbers-1.csv'
-URL_SERVICES = 'https://www.iana.org/assignments/service-names-port-numbers/service-names-port-numbers.csv'
+URL_BASE = 'https://www.iana.org/assignments'
+URL_PROTOCOLS = '{}/protocol-numbers/protocol-numbers-1.csv'.format(URL_BASE)
+URL_SERVICES = '{}/service-names-port-numbers/service-names-port-numbers.csv'.format(URL_BASE)
 
 def console_logging(log_level):
     'setup console logging to level given by args.v'
@@ -32,26 +28,6 @@ def console_logging(log_level):
     log.setLevel(log_level)
     log.addHandler(console_hdl)
 
-def parse_args(argv):
-    'parse commandline arguments, return arguments Namespace'
-    p = argparse.ArgumentParser(
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        description=__doc__)
-    padd = p.add_argument
-    padd('-p', '--protocols', action='store_false')
-    padd('-s', '--services', action='store_true')
-    padd('-v', '--verbose', action='store_const', dest='log_level',
-         const=logging.INFO, default=logging.WARNING,
-         help='show informational messages')
-    padd('-d', '--debug', action='store_const', dest='log_level',
-         const=logging.DEBUG, help='show debug messages')
-    padd('-V', '--Version', action='version',
-         version='{} {}'.format(argv[0], __version__))
-
-    arg = p.parse_args(argv[1:])
-    arg.prog = argv[0]
-    return arg
-
 def load_csv(url):
     'load a csv into a df and normalize columns name somewhat'
     df = pd.read_csv(url)
@@ -59,33 +35,6 @@ def load_csv(url):
     df.columns = df.columns.str.replace(r'\s+', '_')
     log.info('done reading url')
     return df
-
-def write_csv(df, fname):
-    'write a csv without index for filename'
-    df.to_csv(fname, index=False, mode='w')
-    return df
-
-def protocol_tojson(df, fname):
-    'write protocols to json files'
-    # store ip protocol info in json, so we dont need pandas afterwards
-    dd = df.set_index('decimal')
-    dd = dd.drop_duplicates()
-    dct = dict(zip(dd.index, zip(dd['keyword'], dd['protocol'])))
-    with open(fname, 'w') as outfile:
-        json.dump(dct, fp=outfile)
-    log.info('saved {} entries'.format(len(dct)))
-
-def services_tojson(df, fname):
-    'write services to json files'
-    # port/protocol -> service_name
-    dd = df.copy()
-    pt = 'port_number transport_protocol'.split()
-    dd['port'] = dd[pt].apply(lambda g: '/'.join(x for x in g), axis=1)
-    dct = dict(zip(dd['port'], dd['service_name']))
-    with open(fname, 'w') as outfile:
-        json.dump(dct, fp=outfile)
-    log.info('saved {} unique entries'.format(len(dct)))
-
 
 def load_protocols(url):
     'load protocol numbers from iana and prep a ip4-protocols.csv file'
@@ -100,15 +49,12 @@ def load_protocols(url):
     # clean up values
     log.info('cleaning up strings')
     df['protocol'] = df['protocol'].str.replace(r'\s+', ' ') # clean spaces
-
     df['keyword'] = df['keyword'].str.strip()
     df['keyword'] = df['keyword'].str.replace(r'\s.*$', '')  # 1st word
     df['keyword'] = df['keyword'].str.lower()
-
     df['decimal'] = df['decimal'].astype(str)   # ensure they're all strings!
     df['decimal'] = df['decimal'].str.replace(r'\s+', '')  # no whitespace
     df = df.drop_duplicates(subset='decimal', keep='first')  # drop dups
-
 
     # eliminate protocol-ranges by making them explicit
     log.info('making protocol ranges explicit')
@@ -140,7 +86,6 @@ def load_protocols(url):
                               df['keyword'],
                               df['protocol'])
     return df
-
 
 def load_services(url, fname):
     'load ip4 services from iana and prep ip4-services.csv file'
@@ -177,21 +122,73 @@ def load_services(url, fname):
     log.info('{} entries after clean up'.format(len(df.index)))
     return df
 
+def protocol_topy(df, fh):
+    'write protocols dict'
+    df['decimal'] = df['decimal'].astype('int64')
+    dd = df.set_index('decimal')
+    dd = dd.drop_duplicates()
+    dct = dict(zip(dd.index, zip(dd['keyword'], dd['protocol'])))
+    print("\n", file=fh)
+    print('IP4PROTOCOLS = {', file=fh)
+    for k, v in sorted(dct.items()):
+        print('    {}: {},'.format(k, v), file=fh)
+    print('}', file=fh)
+    log.info('wrote {} protocol numbers to {}'.format(len(dct), fh.name))
+
+
+def services_topy(df, fh):
+    'write ip4services.p'
+    dd = df.copy()
+    pt = 'port_number transport_protocol'.split()
+    dd['port'] = dd[pt].apply(lambda g: '/'.join(x for x in g), axis=1)
+    dct = dict(zip(dd['port'], dd['service_name']))
+    print("\n", file=fh)
+    print('IP4SERVICES = {', file=fh)
+    for k,v in sorted(dct.items()):
+        print('    {!r}: {!r},'.format(k, v), file=fh)
+    print('}', file=fh)
+    log.info('wrote {} service entries to {}'.format(len(dct), fh.name))
+
+def parse_args(argv):
+    'parse commandline arguments, return arguments Namespace'
+    p = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__)
+    padd = p.add_argument
+    padd('-v', '--verbose', action='store_const', dest='log_level',
+         const=logging.INFO, default=logging.WARNING,
+         help='show informational messages')
+    padd('-d', '--debug', action='store_const', dest='log_level',
+         const=logging.DEBUG, help='show debug messages')
+    padd('-V', '--Version', action='version',
+         version='{} {}'.format(argv[0], __version__))
+
+    arg = p.parse_args(argv[1:])
+    arg.prog = argv[0]
+    return arg
+
 def main():
 
-    if args.protocols:
+    with open('data.py', 'w') as outf:
+        print("'''", file=outf)
+        print('This file is generated by ' + __file__, file=outf)
+        print('Donot edit, override entries via objects:', file=outf)
+        print(' - ilf.IP4Protocols', file=outf)
+        print(' - ilf.IP4Services', file=outf)
+        print('Data retrieved from:', file=outf)
+        print(' - {}'.format(URL_PROTOCOLS), file=outf)
+        print(' - {}'.format(URL_SERVICES), file=outf)
+        print("'''\n\n", file=outf)
+
         log.info('retrieving protocols, url {}'.format(URL_PROTOCOLS))
         dfp = load_protocols(URL_PROTOCOLS)
-        write_csv(dfp, 'dta/ip4-protocols.csv')
-        protocol_tojson(dfp, 'ip4-protocols.json')
-        log.info('-> done!')
-
-    if args.services:
+        protocol_topy(dfp, outf)
+        print('\n', file=outf)
         log.info('retrieving services, url {}'.format(URL_SERVICES))
         dfs = load_services(URL_SERVICES, 'dta/ip4-services.csv')
-        write_csv(dfs, 'dta/ip4-services.csv')
-        services_tojson(dfs, 'ip4-services.json')
-        log.info('-> done!')
+        services_topy(dfs, outf)
+
+    log.info('done!')
 
 
 if __name__ == '__main__':
