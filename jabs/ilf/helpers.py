@@ -1,14 +1,16 @@
 '''
 Helpers for filter.IP4Filter.
 '''
+
+
 import re
 import math
 
-from assigned_numbers import IP4PROTOCOLS
-from assigned_numbers import IP4SERVICES
+import assigned_numbers
+
 
 class Ip4Protocol(object):
-    'wrapper around data.IP4PROTOCOLS'
+    'translate between ipv4 protocol number and associated name'
 
     def __init__(self):
         self._num_toname = {}       # e.g. 6 -> 'tcp'
@@ -19,7 +21,7 @@ class Ip4Protocol(object):
         # self._num_todesc = dict((int(k), v[1]) for k, v in DCT.items())
         # self._name_tonum = dict((v[0].lower(), int(k)) for k, v in DCT.items())
 
-        for k, (name, desc) in IP4PROTOCOLS.items():
+        for k, (name, desc) in assigned_numbers.IP4PROTOCOLS.items():
             print('k, name, desc', k, name, desc)
             self._num_toname[k] = name
             self._num_todesc[k] = desc
@@ -43,13 +45,13 @@ class Ip4Protocol(object):
 
 
 class Ip4Service(object):
-    'wrapper around data.IP4SERVICES'
+    'translate between ipv4 service name and associated portstrings'
 
     def __init__(self):
         self._service_toports = {}  # e.g https -> ['443/tcp', '443/udp']
         self._port_toservice = {}   # 'port/proto'     -> ip4-service-name
 
-        for portstr, service in IP4SERVICES:
+        for portstr, service in assigned_numbers.IP4SERVICES:
             self._port_toservice[portstr] = service
             self._service_toports.setdefault(service, []).append(portstr)
 
@@ -67,12 +69,15 @@ class Ip4Service(object):
         rv = self._port_toservice.get(portstr.lower(), '')
         return rv
 
-
     def set_service(self, service, portstrings):
         'set known ports for a service, eg http->[80/tcp]'
         # TODO: check validity, remove spaces etc ...
-        self._service_toports[service.lower()] = [x.lower() for x in
-                                                  portstrings]
+        service = service.lower()
+        portstrings = [portstr.lower() for portstr in portstrings]
+
+        self._service_toports[service] = portstrings.copy()
+        for portstr in portstrings:
+            self._port_toservice[portstr.lower()] = service
 
 
 class Ival(object):
