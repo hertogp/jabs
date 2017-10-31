@@ -4,21 +4,11 @@ Ip4Filter - filter ip sessions using src,dst and optionally portstr
 '''
 import os
 import sys
-import argparse
-import logging
 import re
 import math
-import json
 import pandas as pd
-import numpy as np
 import pytricia as pt
 from itertools import zip_longest
-
-import utils as ut
-
-#-- logging
-log = logging.getLogger(__name__)
-log.setLevel(logging.WARNING)
 
 #-- glob
 __version__ = '0.1'
@@ -258,7 +248,13 @@ class Ip4Filter(object):
         'read ruleset from csv-file'
         # TODO: check for empty df and presence of required fields
         inpfile = fname if os.path.isfile(fname) else '{}.csv'.format(fname)
-        df = ut.load_csv(inpfile)
+        try:
+            df = pd.read_csv(inpfile, skipinitialspace=True)
+        except (IOError, OSError):
+            df = pd.DataFrame()  # empty dataframe
+
+        df.columns = [re.sub(r'(\s|\.)+', '_', n) for n in df.columns]
+        # df = ut.load_csv(inpfile)
         if len(df.index) == 0:
             raise IOError('Ip4Filter cannot read {!r}'.format(fname))
 
