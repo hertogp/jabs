@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
 import sys
-sys.path.insert(0, '..')
-import pytest
-import dfm
+if '..' not in sys.path:
+    sys.path.insert(0, '..')
 import logging
+
+import pytest
+
+from jabs import dfm
 
 class TestParseArgs(object):
     'test cli argument parsing'

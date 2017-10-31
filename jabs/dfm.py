@@ -66,15 +66,14 @@ import argparse
 import re
 import logging
 import configparser
-
 from functools import wraps, partial
 
 import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from ilf import Ip4Protocol, Ip4Filter, Ival
-import utils as ut
+from jabs.ilf import Ip4Filter, Ip4Protocol, Ip4Service, Ival
+import jabs.utils as ut
 
 #-- Logging
 
@@ -1042,7 +1041,7 @@ class Commander(object):
         self.check_fields(errors, rhs)
         self.fatal(errors, lhs, rhs)
         log.info('loading services ...')
-        ipp = Ip4Protocol(load_services=True)
+        ipp = Ip4Service()
         log.info('... done!')
         fdst, fport = lhs[0], rhs[0]
 
@@ -1050,7 +1049,7 @@ class Commander(object):
             try:
                 portstr = row[fport]
                 if portstr is not np.nan and len(portstr):
-                    name = ipp.service_byport(portstr)
+                    name = ipp.getservbyport(portstr)
                     if name is None or len(name) == 0:
                         return portstr
                     return name

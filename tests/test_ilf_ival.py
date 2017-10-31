@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-
 import sys
-sys.path.insert(0, '.')
 import random
+if '..' not in sys.path:
+    sys.path.insert(0, '..')
+
 import pytest
 
 from jabs import ilf
