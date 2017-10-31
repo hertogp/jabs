@@ -2,47 +2,11 @@
 
 
 import sys
-sys.path.insert(0, '..')
+sys.path.insert(0, '.')
 import random
 import pytest
 
-import ilf
-
-class TestIpProto(object):
-    'test port, protocol, service conversions'
-
-    known_protos = [('icmp', 1),
-                    ('tcp', 6),
-                    ('udp', 17),
-                    ('rdp', 27),
-                    ('rsvp', 46),
-                    ('gre', 47),
-                    ('esp', 50),
-                    ('ah', 51),
-                    ('encap', 98),
-                    ('eigrp', 88),
-                    ('ospfigp', 89),
-                    ('vrrp', 112),
-                    ]
-
-    def test_init(self):
-        ipp = ilf.Ip4Protocol()
-        assert len(ipp._num_toname) == 256
-        assert len(ipp._num_todesc) == 256
-        assert len(ipp._name_tonum) == 256
-        assert len(ipp._service_toports) == 0
-        assert len(ipp._port_toservice) == 0
-
-    def test_init_loading(self):
-        ipp = ilf.Ip4Protocol()
-        assert len(ipp._num_toname) == 256
-        assert len(ipp._num_todesc) == 256
-        assert len(ipp._name_tonum) > 0
-
-        ipp = ilf.Ip4Protocol(load_services='ip4-services.json')
-        assert len(ipp._service_toports) > 0
-        assert len(ipp._port_toservice) > 0
-
+from jabs import ilf
 
 class TestIval_as_port(object):
     'test Ival.from_portstr'

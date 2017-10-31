@@ -2,11 +2,10 @@
 Helpers for filter.IP4Filter.
 '''
 
-
 import re
 import math
 
-import assigned_numbers
+from . import assigned_numbers
 
 
 class Ip4Protocol(object):
@@ -22,7 +21,6 @@ class Ip4Protocol(object):
         # self._name_tonum = dict((v[0].lower(), int(k)) for k, v in DCT.items())
 
         for k, (name, desc) in assigned_numbers.IP4PROTOCOLS.items():
-            print('k, name, desc', k, name, desc)
             self._num_toname[k] = name
             self._num_todesc[k] = desc
             self._name_tonum[name] = k  # TODO: assumes name's are unique
@@ -51,7 +49,7 @@ class Ip4Service(object):
         self._service_toports = {}  # e.g https -> ['443/tcp', '443/udp']
         self._port_toservice = {}   # 'port/proto'     -> ip4-service-name
 
-        for portstr, service in assigned_numbers.IP4SERVICES:
+        for portstr, service in assigned_numbers.IP4SERVICES.items():
             self._port_toservice[portstr] = service
             self._service_toports.setdefault(service, []).append(portstr)
 
