@@ -13,13 +13,22 @@ from itertools import zip_longest
 #-- glob
 __version__ = '0.1'
 class Ip4Filter(object):
-
+    '''
+    A class for ip session lookup's via src, dst [,portstring]
+    - match() -> True, False or no_match value (None by default)
+    - get()   -> Ip4Match object {
+                    'match': True or False or no_match value,
+                    'data' : dta dict or empty dict (if any)
+                    'ruleid': lowest matching rulenr or -1,
+                    'ruleids': all matching rulenrs
+                    }
+    '''
     def __init__(self, filename=None):
-        self._src = pt.PyTricia()  # pfx  -> set([rid's]) - source ip addr
-        self._dst = pt.PyTricia()  # pfx  -> set([rid's]) - destination ip addr
-        self._dpp = pt.PyTricia()  # pfx' -> set([rid's]) - dest. port/protocol
+        self._src = pt.PyTricia()  # pfx -> set(rids) - Ival(src ip pfx)
+        self._dst = pt.PyTricia()  # pfx -> set(rids) - Ival(dst ip pfx)
+        self._dpp = pt.PyTricia()  # pfx'-> set(rids) - Ival(dport/protocol)
         self._act = {}             # rid -> action (True of False)
-        self._dta = {}             # rid -> dict of additional filter fields (if any)
+        self._dta = {}             # rid -> dict data fields (if any)
         self._pp = Ip4Protocol()   # an Ip4Protocol object
         self._nomatch = None       # is returned when filter has no match
         self.filename = filename
