@@ -176,7 +176,8 @@ def t_STR(t):
     return t
 
 def t_DIR(t):
-    r'<|>'
+    r'<>|<|>'
+    print('DIR', t)
     t.type = 'DIR'
     return t
 
@@ -186,12 +187,16 @@ def t_error(t):
 
 #-- PARSER
 # syntactic actions to turn tokens into ast
-# filter = list of (linenr, statement) tuples
+# A filter program is a list of statements.
+# - a statement is a tuple (filename, linenr, column, stmt-tuple)
+# Productions that yield a top-level statement need to adhere to that format
+# - we terminate statements with NEWLINE, used to determine lineno of statement
+# - we don't do that in the 'statement' production, because we want to use the
+#   NEWLINE token as anchor when defining error-productions ... that way, no
+#   SEMI's are needed to terminate a statement.
 
-def p_error(p):
-    if p:  # delme later
-        print('offending token', p)
-    if not p:
+def p_error(t):
+    if not t:
         print('Unexpected EOF reached')
 
 def p_filter(p):
@@ -204,37 +209,34 @@ def p_filter(p):
         p[0].append(p[2])
 
 def p_statement(p):
-    '''statement : include NEWLINE
-                 | definition NEWLINE
-                 | rule NEWLINE'''
-    p[0] = (p.parser._filename,p.lineno(2), p[1])
-
-def p_statement_error(p):
-    '''statement : error NEWLINE'''
-    p[0] = (p.parser._filename, p.lineno(2), ('ERROR', 'statement failure'))
+    '''statement : include-stmt
+                 | definition-stmt
+                 | rule-stmt'''
+    p[0] = p[1] # (p.parser._filename,p.lineno(2), p[1])
 
 def p_statement_newline(p):
     '''statement : NEWLINE'''
-    p[0] = (p.parser._filename, p.lineno(1), ('BLANK',))
+    p[0] = ast_statement(p, ('BLANK',))
 
 def p_include(p):
-    '''include : INCLUDE PARENSTR'''
-    p[0] = ('INCLUDE', p[2])
+    '''include-stmt : INCLUDE PARENSTR NEWLINE'''
+    p[0] = ast_statement(p, ('INCLUDE', p[2]))
 
 def p_include_error(p):
-    '''include : INCLUDE error'''
-    p[0] = ('ERROR', 'include error')
+    '''include-stmt : INCLUDE error NEWLINE'''
+    p[0] = ast_statement(p, ('ERROR', 'INCLUDE parse error'))
 
 def p_definition(p):
-    '''definition : STR group'''
+    '''definition-stmt : STR group NEWLINE'''
     if p[1][1].lower() == 'any':
-        p[0] = ('ERROR', 'group statetement redefines ANY')
+        p[0] = ast_statement(p, ('ERROR', 'GROUP redefines ANY'))
     else:
-        p[0] = ('GROUP', p[1][1], p[2])
+        p[0] = ast_statement(p, ('GROUP', p[1][1], p[2]))
 
 def p_definition_error(p):
-    '''definition : STR error'''
-    p[0] = ('ERROR', 'group statement failure for {}'.format(p[1][1]))
+    '''definition-stmt : STR error NEWLINE'''
+    p[0] = ast_statement(p,
+                         ('ERROR', 'GROUP {!r} parse error'.format(p[1][1])))
 
 def p_group(p):
     '''group : group COMMA item
@@ -252,21 +254,62 @@ def p_item(p):
     p[0] = p[1]
 
 def p_rule(p):
-    #  0      1     2   3     4   5     6     7     8   9      10
-    '''rule : TILDE tag group DIR group AT group COLON action json'''
+    #  0           1     2   3     4   5     6     7     8   9      10
+    '''rule-stmt : TILDE tag group DIR group AT group COLON action json NEWLINE'''
     # rule = (type tag addrs dir addrs srvs action tag json)
-    p[0] = ('RULE', p[2], p[3], p[4], p[5], p[7], p[9], p[10])
+    p[0] = ast_statement(p,
+                         ('RULE', p[2], p[3], p[4], p[5], p[7], p[9], p[10]))
+
+def p_rule_json_error(p):
+    '''rule-stmt : TILDE tag group DIR group AT group COLON action error NEWLINE'''
+    print('json error', [type(x) for x in p])
+    p[0] = ast_statement(p, ('ERROR', 'JSON parse error'))
+
+def p_rule_action_error(p):
+    '''rule-stmt : TILDE tag group DIR group AT group COLON error NEWLINE'''
+    print('action error', [x for x in p])
+    p[0] = ast_statement(p, ('ERROR', 'ACTION parse error'))
+
+def p_rule_service_error(p):
+    '''rule-stmt : TILDE tag group DIR group AT error NEWLINE'''
+    print('action error', [x for x in p])
+    p[0] = ast_statement(p, ('ERROR', 'SERVICE parse error'))
+
+def p_rule_dest_error(p):
+    '''rule-stmt : TILDE tag group DIR error NEWLINE'''
+    # rule = (type tag addrs dir addrs srvs action tag json)
+    print('action error', [x for x in p])
+    p[0] = ast_statement(p, ('ERROR', 'DESTINATION parse error'))
+
+def p_rule_src_error(p):
+    '''rule-stmt : TILDE tag error NEWLINE'''
+    # rule = (type tag addrs dir addrs srvs action tag json)
+    print('action error', [x for x in p])
+    p[0] = ast_statement(p, ('ERROR', 'SOURCE parse error'))
+
+def p_rule_tag_error(p):
+    '''rule-stmt : TILDE error NEWLINE'''
+    # rule = (type tag addrs dir addrs srvs action tag json)
+    print('action error', [x for x in p])
+    p[0] = ast_item(p, ('ERROR', 'TAG parse error'))
 
 def p_ruleadd(p):
-    '''rule : PLUS DIR group
-            | PLUS AT group'''
+    '''rule-stmt : PLUS DIR group NEWLINE
+                 | PLUS AT group NEWLINE'''
     # rule+ = (type dir/at group)
-    p[0] = ('RULEPLUS', p[2], p[3])
+    p[0] = ast_statement(p, ('RULEPLUS', p[2], p[3]))
 
 def p_ruleadd_error(p):
-    '''rule : PLUS DIR error
-            | PLUS AT error'''
-    p[0] = ('ERROR', 'rule addition failure')
+    '''rule-stmt : PLUS DIR error NEWLINE
+                 | PLUS AT error NEWLINE'''
+    err_elm = {'@': 'SERVICE',
+               '>': 'DESTINATION',
+               '<': 'SOURCE',
+               '<>': 'SRC/DST'
+               }
+
+    p[0] = ast_statement(p, ('ERROR',
+                             'RULEPLUS {} error'.format(err_elm.get(p[2],''))))
 
 def p_tag(p):
     '''tag : PARENSTR
@@ -290,8 +333,9 @@ def p_empty(p):
 
 def parse(text, filename=None, expand=True):
     lexer = lex.lex()
+    lexer.lastnewlinepos = 0
     parser = yacc.yacc()
-    parser._filename = '<text>' if filename is None else filename
+    parser._filename = filename if filename else '<text>'
     ast = parser.parse(text, lexer=lexer)
     if expand:
         ast = ast_expand(ast)
@@ -299,7 +343,7 @@ def parse(text, filename=None, expand=True):
 
 def parsefile(filename, expand=True):
     'parse a file on disk'
-    realfname = os.path.realpath(filename)
+    realfname = os.path.realpath(os.path.normpath(filename))
     if not os.path.isfile(realfname):
         print('fatal: {!r} doesnt look like a file'.format(filename))
         raise SystemExit(1)
@@ -309,11 +353,19 @@ def parsefile(filename, expand=True):
     except (IOError, OSError) as e:
         print('fatal: error', repr(e))
         raise SystemExit(1)
-    return parse(text=text, filename=filename, expand=expand)
+    return parse(text=text, filename=realfname, expand=expand)
 
 # AST helpers
-# AST is [(fname, linenr, ('STMT_TYPE', ..)), ..], including ('ERROR', errmsg)
+# AST is [((fname, linenr, colnr), ('STMT_TYPE', ..)),  ..]
 # - expanding an included file, replaces that statement
+def ast_statement(p, stmt):
+    'a statement is (pos, stmt)-tuple'
+    # automatically sets column to start of error token (if any), 1 otherwise
+    linenr = p.lineno(1)
+    err_tok = next((t for t in p if isinstance(t, lex.LexToken)), None)
+    column = err_tok.lexpos - p.lexpos(1) if err_tok else 1
+    return ((p.parser._filename, linenr, column), stmt)
+
 def ast_includes(ast):
     'return list of includes'
     rv = []
@@ -324,55 +376,55 @@ def ast_includes(ast):
 
 def ast_expand(ast):
     'expand include-statements in-place'
-    # replace include(file) with its ast, in-place and continue expanding
-    # in case of error, replace include-statement with (ERROR, msg)-statement
-    # included file's path is relative to the path of the including file.
-    seen = set([])
+    # - Expand, in-place, any include(file) statements & continue expanding
+    # - In case of an error, include-statement := (ERROR, msg)-statement
+    # - An included file's path is relative to the path of the including file.
+    seen = {}
     idx = -1
 
     while idx+1 < len(ast):
         idx += 1
-        srcfname, linenr, stmt = ast[idx]
+        (fname, linenr, col), stmt = ast[idx]
         if stmt[0] != 'INCLUDE':
             continue
 
-        fname = stmt[1]
-        realfname = os.path.realpath(fname)
-        if realfname in seen:
-            ast[idx] = (srcfname, linenr,
-                        ('ERROR', '{} included more than once'.format(fname)))
+        absname = os.path.realpath(os.path.normpath(
+            os.path.join(os.path.dirname(fname), stmt[1])))
+        if absname in seen:
+            ast[idx] = ((fname, linenr, 1),
+                        ('ERROR', '{} already included by: {}'.format(
+                            absname, seen[absname])))
             continue
 
-        seen.add(realfname)
-        if not os.path.isfile(realfname):
-            ast[idx] = (srcfname, linenr,
-                        ('ERROR', '{} include file not found'.format(fname)))
+        seen[absname] = '{}:{}'.format(fname, linenr)  # record the inclusion
+        if not os.path.isfile(absname):
+            ast[idx] = ((fname, linenr, 1),
+                        ('ERROR', '{} include file not found'.format(absname)))
             continue
 
         try:
-            with open(realfname, 'r') as fp:
-                ilf = fp.read()
+            with open(absname, 'r') as fp:
+                include_data = fp.read()
         except (IOError, OSError):
-            ast[idx] = (srcfname, linenr,
-                        ('ERROR', '{} include file not readable'.format(fname)))
+            ast[idx] = ((fname, linenr, 1),
+                        ('ERROR', '{} include file unreadable'.format(absname)))
             continue
 
         try:
-            ilf_ast = parse(ilf, fname, expand=False)  # expansion is done here
+            include_ast = parse(include_data, absname, expand=False)  # expansion done here
         except Exception as e:
-            ast[idx] = (srcfname, linenr,
-                        ('ERROR', '{} parse err: {}'.format(fname, repr(e))))
+            ast[idx] = ((fname, linenr, 1),
+                        ('ERROR', '{} parse err: {}'.format(absname, repr(e))))
             continue
 
-        ast[idx:idx+1] = ilf_ast  # replace include(file) with its stmts
+        ast[idx:idx+1] = include_ast  # replace include(file) with its stmts
 
     return ast
-
 
 def ast_groups(ast):
     'return dict of all groups'
     rv = {}
-    for fname, linenr, stmt in ast:
+    for (fname, linenr, col), stmt in ast:
         if stmt[0] == 'GROUP':
             if stmt[1] in rv:
                 for item in stmt[2]:
@@ -387,7 +439,7 @@ def ast_group(ast, group, _seen=set([])):
     _seen.add(group)
     coll = set([])
     lowgroup = group.lower()
-    for fname, linenr, stmt in ast:
+    for (fname, linenr, col), stmt in ast:
         if stmt[0] != 'GROUP':
             continue
         name, items = stmt[1], stmt[2]
@@ -451,22 +503,3 @@ def ast_group_org(ast, group, _seen=None):
 # TODO:
 # - any is reserved group name, refers to 0/0
 # - allow shorthand notation for IP
-# - 
-#
-
-
-if __name__ == '__main__':
-
-    ast = parsefile('scr/my.ilf')
-    for stmt in ast:
-        print(stmt)
-
-    print()
-    print('groups', ast_groups(ast).keys())
-    print()
-
-    for k,v in ast_groups(ast).items():
-        print(k, v, '->', ast_group(ast, k))
-        print()
-
-
