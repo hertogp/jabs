@@ -136,7 +136,7 @@ def t_NEWLINE(t):
     return t
 
 def t_IP(t):
-    r'(?i)(HOST_|NET_)?\d+\.\d+\.\d+\.\d+(/\d+)?'
+    r'(?i)(HOST_|NET_)?\d+(\.\d+(\.\d+(\.\d+)?)?)?(/\d+)?'
     t.type = 'IP'
     t.value = re.sub(r'(?i)HOST_|NET_', '', t.value)
     t.value = (t.type, t.value)
@@ -486,4 +486,6 @@ def ast_group(ast, group, _seen=None):
 #      ~ (dns-services) any > dns @ dns : permit
 #        - service -> yields 53/udp, 53/tcp
 #        - network -> yields NET_10.10.10.0/25
-#
+# - RULEPLUS without a preciding, valid RULE stmt
+# - no ERROR's allowed inbetween RULE and RULEPLUS
+
