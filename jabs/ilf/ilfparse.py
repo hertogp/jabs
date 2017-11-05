@@ -177,7 +177,6 @@ def t_STR(t):
 
 def t_DIR(t):
     r'<>|<|>'
-    print('DIR', t)
     t.type = 'DIR'
     return t
 
@@ -355,9 +354,12 @@ def parsefile(filename, expand=True):
         raise SystemExit(1)
     return parse(text=text, filename=realfname, expand=expand)
 
-# AST helpers
-# AST is [((fname, linenr, colnr), ('STMT_TYPE', ..)),  ..]
-# - expanding an included file, replaces that statement
+# -- AST
+# A filter's AST is a list of 2 element tuples: [(position, statement), ...]
+# - position = tuple (filename, linenr, colnr)
+# - statement = tuple ('STMT_TYPE', <specific fields> ..)
+# - when expanding, include statements are replaced with their expansion text
+
 def ast_statement(p, stmt):
     'a statement is (pos, stmt)-tuple'
     # automatically sets column to start of error token (if any), 1 otherwise
@@ -423,7 +425,7 @@ def ast_expand(ast):
 
 def ast_groups(ast):
     'return dict of all groups'
-    rv = {}
+    rv = {}  # {name} -> set([elements])
     for (fname, linenr, col), stmt in ast:
         if stmt[0] == 'GROUP':
             if stmt[1] in rv:
@@ -433,57 +435,30 @@ def ast_groups(ast):
                 rv[stmt[1]] = set(stmt[2])
     return rv
 
-def ast_group(ast, group, _seen=set([])):
+def ast_group(ast, group, _seen=None):
     'expand group to its members'
-    # _seen={} as default is initialized only once (func def time)
-    _seen.add(group)
-    coll = set([])
-    lowgroup = group.lower()
-    for (fname, linenr, col), stmt in ast:
-        if stmt[0] != 'GROUP':
-            continue
-        name, items = stmt[1], stmt[2]
-        if name.lower() != lowgroup:
-            continue
-
-        for item in items:
-            if item[0] == 'STR':
-                gname = item[1]
-                if gname in _seen:
-                    print('warn: circular ref for {!r} via {!r}'.format(gname, group))
-                    continue
-                elif gname.lower() == 'any':
-                    coll.add(('ANY', '0.0.0.0/0'))
-                else:
-                    additions = ast_group(ast, gname)
-                    if len(additions) == 0:
-                        print('warn: group {!r} appears empty!'.format(gname))
-                    for addition in additions:
-                        coll.add(addition)
-            else:
-                coll.add(item) # either IP or PORTSTR
-
-    return list(coll)
-
-def ast_group_org(ast, group, _seen=None):
-    'expand group to its members'
-    # _seen={} as default is initialized only once (func def time)
+    # cannot use _seen=set([]) in func signature -> is initialized only once
+    # (GROUP, group_name, [items, ..])
     _seen = set([]) if _seen is None else _seen
     _seen.add(group)
     coll = set([])
-    lowgroup = group.lower()
-    for fname, linenr, stmt in ast:
+    target_group = group.lower()
+    for (fname, linenr, col), stmt in ast:
         if stmt[0] != 'GROUP':
             continue
-        name, items = stmt[1], stmt[2]
-        if name.lower() != lowgroup:
+        stmt_type, name, items = stmt
+        if name.lower() != target_group:
             continue
 
         for item in items:
-            if item[0] == 'STR':
+            if item[0] in ['IP', 'PORTSTR']:
+                coll.add(item)
+
+            elif item[0] == 'STR':
                 gname = item[1]
                 if gname in _seen:
-                    print('warn: circular ref for {!r} via {!r}'.format(gname, group))
+                    print('warn: circular ref for {!r} via {!r}'.format(gname,
+                                                                        group))
                     continue
                 elif gname.lower() == 'any':
                     coll.add(('ANY', '0.0.0.0/0'))
@@ -494,7 +469,8 @@ def ast_group_org(ast, group, _seen=None):
                     for addition in additions:
                         coll.add(addition)
             else:
-                coll.add(item) # either IP or PORTSTR
+                raise ValueError('illegal item {} in group {}'.format(item,
+                                                                      group))
 
     return list(coll)
 
@@ -502,4 +478,5 @@ def ast_group_org(ast, group, _seen=None):
 # check validity of statements in the AST & check semantics
 # TODO:
 # - any is reserved group name, refers to 0/0
-# - allow shorthand notation for IP
+# - warn when a group is turned into an alias for ANY
+
