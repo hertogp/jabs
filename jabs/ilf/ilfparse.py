@@ -479,4 +479,11 @@ def ast_group(ast, group, _seen=None):
 # TODO:
 # - any is reserved group name, refers to 0/0
 # - warn when a group is turned into an alias for ANY
-
+# - error when a group is referenced but not defined ...
+# - validate networks, services
+# - NB: GROUP may mix IP's, PORTSTR's; relevant parts determined by context
+#   eg dns NET_10.10.10.0/24, 53/udp, 53/tcp; and a rule using it:
+#      ~ (dns-services) any > dns @ dns : permit
+#        - service -> yields 53/udp, 53/tcp
+#        - network -> yields NET_10.10.10.0/25
+#
