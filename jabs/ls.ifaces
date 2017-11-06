@@ -1,0 +1,145 @@
+#!/usr/bin/env python
+
+"""
+read a bunch of config files and list hostname & interface properties
+"""
+
+import sys
+import os
+from optparse import OptionParser
+
+from generatorlib import storelast,g_grep,g_cut,g_cat,g_find,g_open
+
+# -- helper
+def qouted(s, single=False):
+    'qoute field to prevent excell from mangling the text'
+    if single:
+        return '="%s"' % s.strip()  # courtesy of excell
+    else:
+        return '"%s"' % s.strip()
+
+parser = OptionParser()
+parser.add_option('-t', '--top', dest='topdir',
+                  help = 'directory to check for old configs', metavar='TOPDIR')
+parser.add_option('-m', '--match', dest='match',
+                  help = 'filter pattern to select files in topdir', metavar='PATTERN')
+parser.add_option('-v', '--verbose',
+                  action="store_true", dest="verbose", default=False,
+                  help="Provides information as we go")
+
+(options, args) = parser.parse_args()
+
+FPATTERN = options.match or '.*'
+TOPDIR = options.topdir or '.'
+VERBOSE = options.verbose
+
+files = storelast(g_find(FPATTERN, TOPDIR, False))
+lines = storelast(g_cat(g_open(files)))
+grepped = g_grep(["^\s*hostname",
+                  "^\s*interface",
+                  "^\s*int ",
+                  "^\s*ip address",
+                  "^\s*ip vrf forwarding",
+                  "^\s*ip route vrf",
+                  "^\s*snmp-server location",
+                  "^\s*shut",
+                  "^\s*switchport",
+                  "^\s*description"], lines)
+
+# collect hostname, iface, ipaddress, mask
+# Usual format is something like:
+    # hostname <hostname>
+    # interface <ifacename>
+    #   ip address <ip> <msk> [secondary]
+    #   [shutdown]
+    #   switchport access vlan <nr>
+# Running through all lines from all configs we use the following paradigm:
+# - track last hostname seen.  Stuff found without a hostname is ignored
+# - track last interface seen, stuff found without hostname/interface is ignored
+# - when ip address is seen, update last hostname/interface seen
+#
+last_filename = ''
+HOST = ''
+IFACE = ''
+DTA = {}
+cnthosts = {}
+fldnames = "vpn ip msk status vlan allowed native desc loc".split()
+for g in g_cut(' ', grepped, range(15)):
+
+    # reset file level vars & others than can be cleared as well
+    if last_filename != files.last:
+        last_filename = files.last
+        HOST = ''  # new file, new host (hopefully)
+        IFACE = '' # reset this also
+        LOCATION = ''  # new device, new location
+        if VERBOSE:
+            print "Reading: %s" % files.last
+
+    p = [f for f in g]           # preserve case of strings
+    g = [f.lower() for f in g]   # lower case fields for easy matching below
+    if len(g)<1: continue
+    if g[0] == 'hostname' and len(g)>1:
+        HOST = ''.join(p[1:])
+        IFACE = ''
+        DTA[HOST] = {}
+        cnthosts[HOST] = 1 + cnthosts.get(HOST, 0)
+    elif HOST and len(g)>1 and (g[0] == 'interface' or g[0]=='int'):
+        IFACE = ''.join(g[1:])
+        DTA[HOST][IFACE] = dict(zip(fldnames,['-']*len(fldnames)))
+        if IFACE.startswith('vlan'):
+            DTA[HOST][IFACE]['iface'] = IFACE[4:]
+    elif HOST and len(g)>1 and ' '.join(g[0:3]) == 'ip route vrf':
+        # fake a static-interface
+        static = 'static%02d' % len([i for i in DTA[HOST].keys() if
+                                    i.startswith('static')])
+        if g[4] != '0.0.0.0':
+            # fake an interface
+            DTA[HOST][static] = dict(zip(fldnames,['-']*len(fldnames)))
+            DTA[HOST][static]['vpn'] = qouted(p[3])
+            DTA[HOST][static]['ip'] = qouted(g[4], True)
+            DTA[HOST][static]['msk'] = qouted(g[5], True)
+            DTA[HOST][static]['status'] = qouted(g[6])
+            DTA[HOST][static]['desc'] = qouted(p[9])
+            DTA[HOST][static]['native'] = qouted(g[7])
+
+    elif HOST and len(g)>1 and ' '.join(g[0:2]) == 'snmp-server location':
+        # add host-level location info to all interfaces
+        # snmp-server location statement comes after all interface stmts
+        for iface in DTA[HOST].keys():
+            DTA[HOST][iface]['loc'] = qouted(' '.join(p[2:]))  # use actual case
+
+    elif IFACE and len(g)>1 and ' '.join(g[0:2])=='ip address':
+        DTA[HOST][IFACE]['ip'] = qouted(g[2], True)
+        DTA[HOST][IFACE]['msk'] = qouted(g[3], True)
+    elif IFACE and len(g)>1 and ' '.join(g[0:3])=='ip vrf forwarding':
+        DTA[HOST][IFACE]['vpn'] = p[3] # use actual case
+    elif IFACE and len(g)>1 and g[0] == 'description':
+        DTA[HOST][IFACE]['desc'] = qouted(' '.join(p[1:]))
+    elif IFACE and len(g)>0 and g[0] == 'shutdown':
+        DTA[HOST][IFACE]['status'] = g[0]
+    elif IFACE and len(g)>3 and ' '.join(g[0:3])=='switchport access vlan':
+        DTA[HOST][IFACE]['vlan'] = g[3]
+    elif IFACE and len(g)>3 and ' '.join(g[0:3])=='switchport mode trunk':
+        DTA[HOST][IFACE]['vlan'] = 'trunk'
+    elif IFACE and len(g)>5 and ' '.join(g[0:5])=='switchport trunk allowed vlan add':
+        DTA[HOST][IFACE]['allowed'] += ','+g[5]
+    elif IFACE and len(g)>4 and ' '.join(g[0:4])=='switchport trunk allowed vlan':
+        DTA[HOST][IFACE]['allowed'] = g[4]
+    elif IFACE and len(g)>4 and ' '.join(g[0:4])=='switchport trunk native vlan':
+        DTA[HOST][IFACE]['native'] = qouted(g[4])
+
+
+numDTA = 0
+print '%s;%s;%s' % ('host','iface',';'.join(fldnames))
+for host,ifaces in DTA.items():
+    for iface in ifaces:
+        print '%s;%s;%s' % (host,iface,';'.join([ifaces[iface][fld] for fld in fldnames]))
+        numDTA += 1
+
+if VERBOSE:
+    print >> sys.stderr, "saw %d interfaces on %d different hosts" % (numDTA, len(cnthosts))
+    for h in cnthosts:
+        if cnthosts[h] > 1:
+            print >> sys.stderr, "Saw host", h, cnthosts[h], "times"
+
+
