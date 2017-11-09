@@ -103,6 +103,10 @@ class Ival(object):
     def __eq__(self, other):
         return self.start == other.start and self.length == other.length
 
+    def __hash__(self):
+        'needed because of __eq__, donot modify obj when hashed'
+        return hash((self.start, self.length))
+
     def __ne__(self, other):
         return not self.__eq__(other)
 
@@ -130,7 +134,7 @@ class Ival(object):
         elif self.length == 1:
             ports = str(self.start & 0xFFFF)
         else:
-            start = self.start & 0xFF
+            start = self.start & 0xFFFF
             ports = '{}-{}'.format(start, start + self.length - 1)
 
         proto = int((self.start // 2**16) & 0xFF)
@@ -141,8 +145,8 @@ class Ival(object):
         'turn ival (start, length) into pfx string any or a.b.c.d/e'
         # a /32 will be omitted
         err = 'invalid ival for ipv4 pfx {}'.format(self)
-        if self.length == 0:
-            return '0.0.0.0/0' #'any'
+        if self.length == 2**32:
+            return '0.0.0.0/0' #'any'  XXX length 2**32 means any, not length 0
         elif self.length == 1:
             plen = ''
         else:
@@ -154,6 +158,9 @@ class Ival(object):
         d4 = (self.start) & 0xFF
 
         return '{}.{}.{}.{}{}'.format(d1, d2, d3, d4, plen)
+
+    def is_any(self):
+        return self.length == 2**32  # any-interval has max length
 
     def network(self):
         'return new ival for this-network prefix'
@@ -272,6 +279,9 @@ class Ival(object):
             # eg if portstr is not a string or int(port-part) fails
             raise ValueError(err.format(portstr))
 
+    @classmethod
+    def any(cls):
+        return cls(0, 2**32)
 
     @classmethod
     def _combine(cls, x, y, pfx=False):

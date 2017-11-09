@@ -1,13 +1,30 @@
-#!/usr/bin/env python3
+'''
+Test jabs.ifl.Ival
+'''
 
-import sys
 import random
-if '..' not in sys.path:
-    sys.path.insert(0, '..')
+import sys
+sys.path.insert(0, '..')
 
 import pytest
 
-from jabs import ilf
+from jabs.ilf import Ival
+
+class TestIval_hashing(object):
+    'test Ival can be hashed safely'
+
+    def test_set_1(self):
+        i0 = Ival(0,0)
+        i1 = Ival(0,0)
+
+        assert len(set([i0, i1])) == 1
+
+    def test_set_2(self):
+        i0, i1 = Ival(0,2**16), Ival(1,2**16)
+        assert len(set([i0, i1])) == 2
+
+        i0, i1 = Ival(0,0), Ival(1,0)
+        assert len(set([i0, i1])) == 2
 
 class TestIval_as_port(object):
     'test Ival.from_portstr'
@@ -17,30 +34,30 @@ class TestIval_as_port(object):
     def test_any(self):
         'any is a valid portstring meaning any port for any protocol'
         # any port, any protocol -> length is 2**32 with base 0
-        assert ilf.Ival.from_portstr('any') == ilf.Ival(0, 2**32)
-        assert ilf.Ival.from_portstr('any').to_portstr() == 'any'
+        assert Ival.from_portstr('any') == Ival(0, 2**32)
+        assert Ival.from_portstr('any').to_portstr() == 'any'
 
         with pytest.raises(ValueError):
-            ilf.Ival.from_portstr('any/any')
+            Ival.from_portstr('any/any')
 
     def test_any_proto(self):
         'any/<protoname> is valid portstring meaning any <protoname>-port'
         # any sctp port (port = 16 uint so 2**16 ports
-        assert ilf.Ival.from_portstr('any/hopopt') == ilf.Ival(0, 2**16)
-        assert ilf.Ival(0, 2**16).to_portstr() == 'any/hopopt'
+        assert Ival.from_portstr('any/hopopt') == Ival(0, 2**16)
+        assert Ival(0, 2**16).to_portstr() == 'any/hopopt'
 
-        assert ilf.Ival.from_portstr('any/tcp') == ilf.Ival(6 * 2**16, 2**16)
-        assert ilf.Ival.from_portstr('any/tcp').to_portstr() == 'any/tcp'
+        assert Ival.from_portstr('any/tcp') == Ival(6 * 2**16, 2**16)
+        assert Ival.from_portstr('any/tcp').to_portstr() == 'any/tcp'
 
-        assert ilf.Ival.from_portstr('any/udp') == ilf.Ival(17 * 2**16, 2**16)
-        assert ilf.Ival.from_portstr('any/udp').to_portstr() == 'any/udp'
+        assert Ival.from_portstr('any/udp') == Ival(17 * 2**16, 2**16)
+        assert Ival.from_portstr('any/udp').to_portstr() == 'any/udp'
 
-        assert ilf.Ival.from_portstr('any/sctp') == ilf.Ival(132 * 2**16, 2**16)
-        assert ilf.Ival.from_portstr('any/sctp').to_portstr() == 'any/sctp'
+        assert Ival.from_portstr('any/sctp') == Ival(132 * 2**16, 2**16)
+        assert Ival.from_portstr('any/sctp').to_portstr() == 'any/sctp'
 
         # only 255 has protocol name reserverd ... hmmm..
-        assert ilf.Ival.from_portstr('any/reserved') == ilf.Ival(255 * 2**16, 2**16)
-        assert ilf.Ival.from_portstr('any/reserved').to_portstr() == 'any/reserved'
+        assert Ival.from_portstr('any/reserved') == Ival(255 * 2**16, 2**16)
+        assert Ival.from_portstr('any/reserved').to_portstr() == 'any/reserved'
 
 
     def test_good_portstrings(self):
@@ -48,7 +65,7 @@ class TestIval_as_port(object):
         # ival start = 0.proto.port2.port1 = protonr * 2*16 + port nr
         for nr in [0, 1, 128, 365, 2*10-1, 65535]:
             port = '{}/sctp'.format(nr)  # all 1 port only, so length == 1
-            assert ilf.Ival.from_portstr(port) == ilf.Ival(132 * 2**16 + nr, 1)
+            assert Ival.from_portstr(port) == Ival(132 * 2**16 + nr, 1)
 
     def test_bad_portstrings(self):
         invalids = ['-1/tcp',     # no negative port nrs
@@ -59,7 +76,7 @@ class TestIval_as_port(object):
                     ]
         for invalid in invalids:
             with pytest.raises(ValueError):
-                ilf.Ival.from_portstr(invalid)
+                Ival.from_portstr(invalid)
 
     def test_portstrings_with_range(self):
         cases = [
@@ -72,16 +89,18 @@ class TestIval_as_port(object):
         ]
 
         for portstr, start, length in cases:
-            assert ilf.Ival.from_portstr(portstr) == ilf.Ival(start, length)
-            assert ilf.Ival.from_portstr(portstr).to_portstr() == portstr
+            assert Ival.from_portstr(portstr) == Ival(start, length)
+            assert Ival.from_portstr(portstr).to_portstr() == portstr
 
         # border cases, where to_portstr() returns saner portstring
-        assert ilf.Ival.from_portstr('0-0/tcp') == ilf.Ival(6 * 2**16, 1)
-        assert ilf.Ival.from_portstr('0-0/tcp').to_portstr() == '0/tcp'
+        assert Ival.from_portstr('0-0/tcp') == Ival(6 * 2**16, 1)
+        assert Ival.from_portstr('0-0/tcp').to_portstr() == '0/tcp'
 
-        assert ilf.Ival.from_portstr('0-65535/tcp') == ilf.Ival(6 * 2**16, 2**16)
-        assert ilf.Ival.from_portstr('0-65535/tcp').to_portstr() == 'any/tcp'
+        assert Ival.from_portstr('0-65535/tcp') == Ival(6 * 2**16, 2**16)
+        assert Ival.from_portstr('0-65535/tcp').to_portstr() == 'any/tcp'
 
+    def test_portstr_ranges(self):
+        assert Ival.from_portstr('5200-5300/tcp').to_portstr() == '5200-5300/tcp'
 
     def test_single_range(self):
         'multiple ports combine into 1 range'
@@ -91,8 +110,8 @@ class TestIval_as_port(object):
                  ]
 
         for ports, summary in cases:
-            ivals = [ilf.Ival.from_portstr(x) for x in ports]
-            summ = ilf.Ival.port_summary(ivals)
+            ivals = [Ival.from_portstr(x) for x in ports]
+            summ = Ival.port_summary(ivals)
             assert len(summ) == 1
             assert summ[0].to_portstr() == summary
 
@@ -106,8 +125,8 @@ class TestIval_as_port(object):
                  ]
 
         for ports, ranges in cases:
-            ivals = [ilf.Ival.from_portstr(x) for x in ports]
-            summ = ilf.Ival.port_summary(ivals)
+            ivals = [Ival.from_portstr(x) for x in ports]
+            summ = Ival.port_summary(ivals)
             assert len(summ) == len(ranges)
             assert all(x.to_portstr() in ranges for x in summ)
 
@@ -123,14 +142,14 @@ class TestIval_as_portproto(object):
                   ]
 
         for port, proto in valids:
-            ilf.Ival.from_portproto(port, proto)
+            Ival.from_portproto(port, proto)
 
     def test_known_port_protos(self):
-        assert '80/tcp' == ilf.Ival.from_portproto(80, 6).to_portstr()
-        print(ilf.Ival.from_portproto(3216,6))
-        print(ilf.Ival.from_portstr('3216/tcp').values())
-        assert ilf.Ival.from_portproto(3216, 6) == ilf.Ival.from_portstr('3216/tcp')
-        assert '3216/tcp' == ilf.Ival.from_portproto(3216, 6).to_portstr()
+        assert '80/tcp' == Ival.from_portproto(80, 6).to_portstr()
+        print(Ival.from_portproto(3216,6))
+        print(Ival.from_portstr('3216/tcp').values())
+        assert Ival.from_portproto(3216, 6) == Ival.from_portstr('3216/tcp')
+        assert '3216/tcp' == Ival.from_portproto(3216, 6).to_portstr()
 
     def test_bad_portprotos(self):
         invalids = [(-1,0),      # port nr too small
@@ -141,15 +160,15 @@ class TestIval_as_portproto(object):
 
         with pytest.raises(ValueError):
             for port, proto in invalids:
-                ilf.Ival.from_portproto(port, proto)
+                Ival.from_portproto(port, proto)
 
 class TestIval_as_pfx(object):
     'test Ival as prefix'
 
     def test_any(self):
-        assert ilf.Ival.from_pfx('0/0').to_pfx() == '0.0.0.0/0'
-        assert ilf.Ival.from_pfx('any').to_pfx() == '0.0.0.0/0'
-        assert ilf.Ival.from_pfx('0.0.0.0/0').to_pfx() == '0.0.0.0/0'
+        assert Ival.from_pfx('0/0').to_pfx() == '0.0.0.0/0'
+        assert Ival.from_pfx('any').to_pfx() == '0.0.0.0/0'
+        assert Ival.from_pfx('0.0.0.0/0').to_pfx() == '0.0.0.0/0'
 
     def test_from_pfx_good(self):
         cases = [('1/8', '1.0.0.0/8'),
@@ -163,7 +182,7 @@ class TestIval_as_pfx(object):
                  ]
 
         for pfx, proper in cases:
-            assert ilf.Ival.from_pfx(pfx).to_pfx() == proper
+            assert Ival.from_pfx(pfx).to_pfx() == proper
 
 
     def test_from_pfx_bad(self):
@@ -185,7 +204,7 @@ class TestIval_as_pfx(object):
 
         for invalid in invalids:
             with pytest.raises(ValueError):
-                ilf.Ival.from_pfx(invalid)
+                Ival.from_pfx(invalid)
 
     def test_network(self):
         valids = [
@@ -197,7 +216,7 @@ class TestIval_as_pfx(object):
         ]
 
         for pfx, netpfx, netaddr, bcastaddr in valids:
-            ival = ilf.Ival.from_pfx(pfx)
+            ival = Ival.from_pfx(pfx)
             assert ival.network().to_pfx() == netpfx
             assert ival.network().address() == netaddr
             assert ival.broadcast().address() == bcastaddr
@@ -220,8 +239,8 @@ class TestIval_as_pfx(object):
                   ]
 
         for pfxs, summ in valids:
-            ivals = list(map(ilf.Ival.from_pfx, pfxs))
-            isumm = ilf.Ival.pfx_summary(ivals)
+            ivals = list(map(Ival.from_pfx, pfxs))
+            isumm = Ival.pfx_summary(ivals)
             assert len(isumm) == 1
-            assert isumm[0] == ilf.Ival.from_pfx(summ)
+            assert isumm[0] == Ival.from_pfx(summ)
 
