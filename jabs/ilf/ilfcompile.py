@@ -16,10 +16,12 @@ def ast_iter(ast, types=[]):
     for pos, stmt in ast:
         if stmt[0] in types:
             yield (pos, stmt)
+
 def ast_enum(ast, types=[]):
     'enumerate across statements of requested types'
+    yield_all = len(types) == 0
     for idx, (pos, stmt) in enumerate(ast):
-        if stmt[0] in types:
+        if yield_all or stmt[0] in types:
             yield (idx, pos, stmt)
 
 def ast_error(pos, err_type, stmt_type, msg):
@@ -64,7 +66,7 @@ def ast_includes(ast):
     return ast
 def _ivalify(lst):
     'return same list with IP, PORTSTR - values turned into Ivals'
-    rv = []
+    rv, errs = [], []  # in case of errors
     errs = []
     for elm in lst:
         try:
@@ -84,8 +86,7 @@ def _ivalify(lst):
     return rv
 
 def ast_ivalify(ast):
-    'replace IP and PORTSTR values with their Ival-values'
-    # in case of errors, replace stmt with ERROR stmt
+    'turn IP- and PORTSTR-values into Ival-s'
     for idx, pos, stmt in ast_enum(ast, ['GROUP', 'RULE', 'RULEPLUS']):
         try:
             if stmt[0] == 'GROUP':
@@ -100,7 +101,6 @@ def ast_ivalify(ast):
                 raise ValueError('{} invalid stmt for ast_ivalify'.format(
                     stmt[0]))
         except ValueError as e:
-            print(dir(e))
             ast[idx] = ast_error(pos, 'ERROR', stmt[0], '{}'.format((e)))
 
     return ast
@@ -196,12 +196,9 @@ def ast_score(ast):
     return (errs, warn)
 
 #-- SEMANTICS
-# check validity of statements in the AST & check semantics
-# TODO:
-# - validate networks, services
 
 def ast_semantics(ast):
-    'run defined checks, chk_xyz, on ast and return ast'
+    'run all chk_ast_funcs on ast'
     # all chk_xyz(ast) -> must return an (un)modified, valid ast
     for check in [x for x in globals() if x.startswith('chk_')]:
         semantics = globals()[check]
@@ -212,22 +209,17 @@ def ast_semantics(ast):
 
 def chk_ast_dangling(ast):
     'check for dangling RULEPLUS statements'
-    idx = -1
-    max_ = len(ast) - 1
-    parent = None  # last parent stmt with scope for ruleplus
-    while idx < max_:
-        idx += 1
-        pos, stmt = ast[idx]
-        stype = stmt[0]
-        if stype == 'BLANK':
+    scope = None  # determines current scope (if any)
+    print('dangling', len(ast))
+    for idx, pos, stmt in ast_enum(ast):
+        print('chk_dangling', scope, idx, stmt)
+        if stmt[0] == 'BLANK':
             continue
-        if stype == 'RULEPLUS' and parent not in ['RULE', 'RULEPLUS']:
-                ast[idx] = (pos, ('ERROR', 'RULEPLUS',
-                                  'not in scope of a RULE'))
-
-        # only allow intermediate ERRORs for RULE[PLUS] as a parent
-
-        parent = stmt[1] if stype in ['ERROR', 'WARNING'] else stype
+        if stmt[0] == 'RULEPLUS' and scope not in ['RULE', 'RULEPLUS']:
+            print('-'*80)
+            ast[idx] = (pos, ('ERROR', 'RULEPLUS',
+                              'not in scope of a RULE'))
+        scope = stmt[1] if stmt[0] in ['ERROR', 'WARNING'] else stmt[0]
 
     return ast
 
@@ -293,7 +285,7 @@ def compile(filename):
     if trouble:
         for pos, msg in trouble:
             print('{}{}'.format(pos, msg))
-        print('E{}, W{}'.format(errors, warnings))
+        print('Score: E{}, W{}'.format(errors, warnings))
         raise SystemExit(1)
 
     return ast
