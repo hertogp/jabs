@@ -1,11 +1,12 @@
 '''
 test Ip4Proto
 '''
+
+import pytest
 import sys
 sys.path.insert(0, '..')
 sys.path.insert(0, '.')
 
-import pytest
 from jabs import ilf
 
 
@@ -64,8 +65,9 @@ class TestIpProto(object):
         with pytest.raises(ValueError):
             ipp.getnamebyproto(-1)
 
+
 class TestIp4Service(object):
     'test ipv4 service name/ports translation'
-
     def test_init(self):
         ips = ilf.Ip4Service()
+        del ips  # to prevent unused var err msg
