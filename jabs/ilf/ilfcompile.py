@@ -1,4 +1,6 @@
-# Ip Log Filter - compiler
+'''
+ilf - compiler
+'''
 
 import os
 
@@ -6,11 +8,11 @@ from .ilfparse import parse
 from .ilfilter import Ip4Filter
 from .helpers import Ival
 
-#-- GLOBALS
+# -- GLOBALS
 NETS = {'any': set([Ival.from_pfx('any')])}      # name -> set(IP's)
 SRVS = {'any': set([Ival.from_portstr('any')])}  # name -> set(PORTSTR's)
 
-#-- AST = [(pos, stmt), ..]
+# -- AST = [(pos, stmt), ..]
 def ast_iter(ast, types=[]):
     'iterate across statements of requested types'
     for pos, stmt in ast:

@@ -1,13 +1,14 @@
-#!/usr/bin/env python3
+'''
+test dfm script
+'''
 
-import sys
-if '..' not in sys.path:
-    sys.path.insert(0, '..')
 import logging
-
-import pytest
+import sys
+sys.path.insert(0, '..')  # in case we run test inside test dir
+sys.path.insert(0, '.')   # in case we run test inside main jabs dir
 
 from jabs import dfm
+
 
 class TestParseArgs(object):
     'test cli argument parsing'
@@ -26,7 +27,6 @@ class TestParseArgs(object):
         opts = dfm.parse_args('dfm -d r:dummy.csv'.split())
         assert opts.log_level == logging.DEBUG
 
-
     def test_good_cmds(self):
         'check some generic simple command parsing'
         calls = ['dfm r:a.csv f1,f2',
@@ -38,4 +38,3 @@ class TestParseArgs(object):
             opts = dfm.parse_args(args)
             assert len(opts.cmds) == len(opts.command)
             assert len(opts.cmds) == len(args) - 1
-

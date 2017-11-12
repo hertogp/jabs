@@ -1,12 +1,13 @@
-#!/usr/bin/env python3
-
+'''
+test Ip4Proto
+'''
 import sys
-if '..' not in sys.path:
-    sys.path.insert(0, '..')
+sys.path.insert(0, '..')
+sys.path.insert(0, '.')
 
 import pytest
-
 from jabs import ilf
+
 
 class TestIpProto(object):
     'test ipv4 protocol number/name translation'
@@ -41,7 +42,7 @@ class TestIpProto(object):
     def test_roundtrip(self):
         'check roundtrip translation proto>name>proto'
         ipp = ilf.Ip4Protocol()
-        PROT = ilf.assigned_numbers.IP4PROTOCOLS
+        PROT = ilf.numbers.IP4PROTOCOLS
         for proto, (name, desc) in PROT.items():
             assert name == ipp.getnamebyproto(proto)
             assert proto == ipp.getprotobyname(name)
@@ -68,5 +69,3 @@ class TestIp4Service(object):
 
     def test_init(self):
         ips = ilf.Ip4Service()
-
-

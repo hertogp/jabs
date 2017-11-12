@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 '''
-Helper script to retrieve IPv4 protocols & services from IANA and write data.py
+Helper script:
+ - reads IANA IPv4 proto numbers & services
+ - writes numbers.py
 '''
 
 import sys
@@ -16,7 +18,10 @@ log.setLevel(logging.WARNING)
 
 URL_BASE = 'https://www.iana.org/assignments'
 URL_PROTOCOLS = '{}/protocol-numbers/protocol-numbers-1.csv'.format(URL_BASE)
-URL_SERVICES = '{}/service-names-port-numbers/service-names-port-numbers.csv'.format(URL_BASE)
+# URL_SERVICES = '{}/service-names-port-numbers/service-names-port-numbers.csv'.format(URL_BASE)
+URL_SERVICES = '{0}/{1}/{1}.csv'.format(URL_BASE, 'service-names-port-numbers')
+PY_OUTFILE = 'numbers.py'
+
 
 def console_logging(log_level):
     'set console logging to level given by args.v'
@@ -28,6 +33,7 @@ def console_logging(log_level):
     log.setLevel(log_level)
     log.addHandler(console_hdl)
 
+
 def load_csv(url):
     'load a csv into a df and normalize column names somewhat'
     df = pd.read_csv(url)
@@ -35,6 +41,7 @@ def load_csv(url):
     df.columns = df.columns.str.replace(r'\s+', '_')
     log.info('done reading url')
     return df
+
 
 def load_protocols(url):
     'load protocol numbers from iana'
@@ -47,7 +54,7 @@ def load_protocols(url):
 
     # clean up values
     log.info('cleaning up strings')
-    df['protocol'] = df['protocol'].str.replace(r'\s+', ' ') # clean spaces
+    df['protocol'] = df['protocol'].str.replace(r'\s+', ' ')  # clean spaces
     df['keyword'] = df['keyword'].str.strip()
     df['keyword'] = df['keyword'].str.replace(r'\s.*$', '')  # 1st word
     df['keyword'] = df['keyword'].str.lower()
@@ -61,9 +68,9 @@ def load_protocols(url):
     for idx, row in df[df['decimal'].str.contains('-')].iterrows():
         parts = row['decimal'].split('-')
         start = int(parts[0])
-        stop  = int(parts[-1])
+        stop = int(parts[-1])
         proto = row['protocol']
-        orgkey =  row['keyword']
+        orgkey = row['keyword']
         for num in range(start, stop+1):
             keyw = 'ip{}'.format(num) if pd.isnull(orgkey) else orgkey
             rows.append({'decimal': str(num),
@@ -74,7 +81,7 @@ def load_protocols(url):
     df = df[~df['decimal'].str.contains('-')]  # drop the 'start-max' entries
 
     # set any remaining NaN keywords to <nr>
-    # donot use '{}/ip'.format(df['decimal']) <-- insert whole decimal column ..
+    # donot use '{}/ip'.format(df['decimal']) <-- insert whole decimal column!
     log.info('filling empty strings (if any) with sane defaults')
     df['keyword'] = np.where(df['keyword'].isnull(),
                              'ip' + df['decimal'],
@@ -86,20 +93,21 @@ def load_protocols(url):
                               df['protocol'])
     return df
 
+
 def load_services(url):
     'load ip4 services from iana'
     cols = 'port_number transport_protocol service_name'.split()
     df = load_csv(URL_SERVICES)
     log.info('keep only columns {!r}'.format(cols))
     df = df[cols]
-    df = df.dropna() # if any field is nan, drop the row
+    df = df.dropna()  # if any field is nan, drop the row
 
     log.info('cleaning up strings')
     for col in cols:
-        df[col] = df[col].astype(str)               # ensure strings
-        df[col] = df[col].str.lower()               # lowercase
-        df[col] = df[col].str.replace(r'\s.*$', '') # 1st word only
-        df[col] = df[col].str.replace('_', '-')     # aliased names -/_
+        df[col] = df[col].astype(str)                # ensure strings
+        df[col] = df[col].str.lower()                # lowercase
+        df[col] = df[col].str.replace(r'\s.*$', '')  # 1st word only
+        df[col] = df[col].str.replace('_', '-')      # aliased names -/_
 
     # eliminate port-ranges by making them explicit
     log.info('make port-ranges explicit')
@@ -107,18 +115,20 @@ def load_services(url):
     for idx, row in df[df['port_number'].str.contains('-')].iterrows():
         parts = row['port_number'].split('-')
         start = int(parts[0])
-        stop  = int(parts[-1])
-        service = 'p-{}'.format(num) if not row['service_name'] else row['service_name']
+        stop = int(parts[-1])
         proto = row['transport_protocol']
         if not proto:
             continue
+        service = row['service_name']
         for num in range(start, stop+1):
-            rows.append(dict(zip(cols, [str(num), proto, service])))
+            srv = service if service else 'p-{}'.format(num)
+            rows.append(dict(zip(cols, [str(num), proto, srv])))
 
     df = df.append(rows, ignore_index=True)
     df = df[~df['port_number'].str.contains('-')]
     log.info('{} entries after clean up'.format(len(df.index)))
     return df
+
 
 def protocol_topy(df, fh):
     'write protocols dict'
@@ -133,6 +143,7 @@ def protocol_topy(df, fh):
     print('}', file=fh)
     log.info('wrote {} protocol numbers to {}'.format(len(dct), fh.name))
 
+
 def services_topy(df, fh):
     'write services dict'
     dd = df.copy()
@@ -141,10 +152,11 @@ def services_topy(df, fh):
     dct = dict(zip(dd['port'], dd['service_name']))
     print("", file=fh)
     print('IP4SERVICES = {', file=fh)
-    for k,v in sorted(dct.items()):
+    for k, v in sorted(dct.items()):
         print('    {!r}: {!r},'.format(k, v), file=fh)
     print('}', file=fh)
     log.info('wrote {} service entries to {}'.format(len(dct), fh.name))
+
 
 def parse_args(argv):
     'parse command line arguments'
@@ -164,9 +176,10 @@ def parse_args(argv):
     arg.prog = argv[0]
     return arg
 
+
 def main():
 
-    with open('assigned_numbers.py', 'w') as outf:
+    with open(PY_OUTFILE, 'w') as outf:
         print("'''", file=outf)
         print('This file is generated by ' + __file__, file=outf)
         print('Donot edit, override entries via objects:', file=outf)

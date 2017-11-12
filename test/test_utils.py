@@ -1,13 +1,9 @@
-#!/usr/bin/env python3
-
-import random
-import sys
-if '..' not in sys.path:
-    sys.path.insert(0, '..')
-
 import pytest
-
-from jabs import utils
+import sys
+sys.path.insert(0, '..')
+sys.path.insert(0, '.')
+print('test_utils', sys.path)
+import jabs.utils as ut
 
 
 class TestStr2List(object):
@@ -15,7 +11,7 @@ class TestStr2List(object):
 
     def test_str2list(self):
         'should split a string on <space> or <comma>'
-        str2list = utils.str2list
+        str2list = ut.str2list
         assert str2list('') == []
         assert str2list('a b') == ['a', 'b']
         assert str2list('a,B') == ['a', 'B']
@@ -25,7 +21,7 @@ class TestPfxStringHandlers(object):
     def test_pfx_proper(self):
         'pfx_proper ensures a well-formatted prefix string'
         # Does not turn ip addres into this-network address
-        pfx_proper = utils.pfx_proper
+        pfx_proper = ut.pfx_proper
         assert '10.0.0.0/8' == pfx_proper('10/8')
         assert '10.10.0.0/8' == pfx_proper('10.10/8')
         assert '10.10.10.0/8' == pfx_proper('10.10.10/8')
@@ -40,7 +36,7 @@ class TestPfxSummarization(object):
 
     def test_ival_combine(self):
         'check intervals are combined properly'
-        combi = utils.ival_combine
+        combi = ut.ival_combine
         # combine adjacent intervals of equal length
         assert ((10,12), None) == combi((10,6), (16,6))
         assert ((10,12), None) == combi((16,6), (10,6))
@@ -54,7 +50,7 @@ class TestPfxSummarization(object):
 
     def test_pfx_summary_adjacent(self):
         'check how ip nrs are summarized'
-        summ = utils.pfx_summary
+        summ = ut.pfx_summary
         assert ['1.1.1.0/24'] == summ(['1.1.1.0/25', '1.1.1.128/25'])
         assert ['1.1.1.0/24'] == summ(['1.1.1.0/25', '1.1.1.128/25'])
         assert ['1.1.1.0/24'] == summ(['1.1.1.0/26', '1.1.1.64/26',
@@ -84,7 +80,7 @@ class TestPfxSummarization(object):
                                        range(0,256)])
 
     def test_pfx_summary_overlapping(self):
-        summ = utils.pfx_summary
+        summ = ut.pfx_summary
         assert ['1.1.1.0/24'] == summ(['1.1.1.0/24', '1.1.1.0/24'])
         assert ['1.1.1.0/24'] == summ(['1.1.1/24',
                                        '1.1.1.128/30'
@@ -100,7 +96,7 @@ class TestPfxSummarization(object):
         assert ['0.0.0.0/0'] == summ(['10.0.0.0/8','0/0'])
 
     def test_pfx_summary_nonoverlapping(self):
-        summ = utils.pfx_summary
+        summ = ut.pfx_summary
         assert ['1.1.1.0/25', '2.2.2.128/25'] == summ(['2.2.2.128/26',
                                                        '1.1.1/26',
                                                        '2.2.2.192/26',
@@ -115,38 +111,38 @@ class TestCmdTokenizer(object):
 
     def test_whitespace(self):
         'whitespace in fields remains intact'
-        toks = utils.cmd_tokens
+        toks = ut.cmd_tokens
         l = toks('f1,f2 f3,f4 f5')
         assert l == [(',', 'f1'), (',', 'f2 f3'), ('', 'f4 f5')]
 
     def test_single_word(self):
         'a single value is passed back without separator'
-        toks = utils.cmd_tokens
+        toks = ut.cmd_tokens
         l = toks('f')
         assert l == [('', 'f')]
 
     def test_sep_comma(self):
-        toks = utils.cmd_tokens
+        toks = ut.cmd_tokens
         l = toks('f1,f2,f1')
         assert l == [(',', 'f1'), (',', 'f2'), ('','f1')]
 
     def test_sep_equal(self):
-        toks = utils.cmd_tokens
+        toks = ut.cmd_tokens
         l = toks('f1=f2')
         assert l == [('=', 'f1'), ('', 'f2')]
 
     def test_sep_doublecolon(self):
-        toks = utils.cmd_tokens
+        toks = ut.cmd_tokens
         l = toks('func:a1')
         assert l == [(':', 'func'), ('', 'a1')]
 
     def test_sep_tilde(self):
-        toks = utils.cmd_tokens
+        toks = ut.cmd_tokens
         l = toks('f1~f2')
         assert l == [('~', 'f1'), ('', 'f2')]
 
     def test_escaping(self):
-        toks = utils.cmd_tokens
+        toks = ut.cmd_tokens
         # escape \,
         l = toks('f\,1,f2')
         assert l == [(',', 'f,1'), ('','f2')]
@@ -173,24 +169,24 @@ class TestCmdParser(object):
     # cmd_parser(cmd_str) ->[cmd_str, command, lhs-fields, rhs-fields]
 
     def test_default_cmd(self):
-        parse = utils.cmd_parser
-        tokens = utils.cmd_tokens
+        parse = ut.cmd_parser
+        tokens = ut.cmd_tokens
         cmd, lhs, rhs = parse(tokens('f1'))
         assert cmd == 'keep'
         assert lhs == ['f1']
         assert rhs == []
 
     def test_only_fields(self):
-        parse = utils.cmd_parser
-        tokens = utils.cmd_tokens
+        parse = ut.cmd_parser
+        tokens = ut.cmd_tokens
         cmd, lhs, rhs = parse(tokens('f1,f2'))
         assert cmd == 'keep'
         assert lhs == ['f1','f2']
         assert rhs == []
 
     def test_only_function(self):
-        parse = utils.cmd_parser
-        tokens = utils.cmd_tokens
+        parse = ut.cmd_parser
+        tokens = ut.cmd_tokens
         cmd, lhs, rhs = parse(tokens('func:'))
         assert cmd == 'func'
         assert lhs == []
@@ -207,24 +203,24 @@ class TestCmdParser(object):
         assert rhs == []
 
     def test_lhs(self):
-        parse = utils.cmd_parser
-        tokens = utils.cmd_tokens
+        parse = ut.cmd_parser
+        tokens = ut.cmd_tokens
         cmd, lhs, rhs = parse(tokens('f1,f2=func:'))
         assert cmd == 'func'
         assert lhs == ['f1', 'f2']
         assert rhs == []
 
     def test_rhs(self):
-        parse = utils.cmd_parser
-        tokens = utils.cmd_tokens
+        parse = ut.cmd_parser
+        tokens = ut.cmd_tokens
         cmd, lhs, rhs = parse(tokens('func:a1,a2'))
         assert cmd == 'func'
         assert lhs == []
         assert rhs == ['a1', 'a2']
 
     def test_full_cmds(self):
-        parse = utils.cmd_parser
-        tokens = utils.cmd_tokens
+        parse = ut.cmd_parser
+        tokens = ut.cmd_tokens
 
         # call a func with args and assing to multiple fields
         cmd, lhs, rhs = parse(tokens('f1,f2=func:a1,a2'))
@@ -246,11 +242,11 @@ class TestCmdParser(object):
 
     def test_cmd_roundtrip(self):
         'command reconstruction from [cmd, lhs, rhs]'
-        # utils.cmd_str(cmd, lhs, rhs) -> lhs=cmd:rhs
-        parse = utils.cmd_parser
-        tokens = utils.cmd_tokens
-        tokens = utils.cmd_tokens
-        recon = utils.cmd_str    # reconstruct from [cmd, lhs, rhs]
+        # ut.cmd_str(cmd, lhs, rhs) -> lhs=cmd:rhs
+        parse = ut.cmd_parser
+        tokens = ut.cmd_tokens
+        tokens = ut.cmd_tokens
+        recon = ut.cmd_str    # reconstruct from [cmd, lhs, rhs]
 
         cmd = 'f1~a1'  # -> command name regex
         assert recon(*parse(tokens(cmd))) == 'f1=regex:a1'
@@ -284,7 +280,7 @@ class TestCmdParser(object):
 class TestUnitConversions(object):
 
     def test_uint2dotq(self):
-        uint2dotq = utils.uint2dotq
+        uint2dotq = ut.uint2dotq
 
         assert '0.0.0.0' == uint2dotq(0)
         assert '0.0.0.255' == uint2dotq(0x000000FF)
@@ -309,7 +305,7 @@ class TestUnitConversions(object):
             uint2dotq(2**32)
 
     def test_dotq2uint(self):
-        dotq2uint = utils.dotq2uint
+        dotq2uint = ut.dotq2uint
 
         # include shorthand notation
         assert 0 == dotq2uint('0.0.0.0')
@@ -339,7 +335,7 @@ class TestUnitConversions(object):
             dotq2uint('1.1.1.x')
 
     def test_len2mask(self):
-        len2mask = utils.len2mask
+        len2mask = ut.len2mask
 
         assert 0x0 == len2mask(0)
         assert 0xFF000000 == len2mask(8)
@@ -348,7 +344,7 @@ class TestUnitConversions(object):
         assert 0xFFFFFFFF == len2mask(32)
 
     def test_mask2len(self):
-        mask2len = utils.mask2len
+        mask2len = ut.mask2len
 
         assert mask2len(0x0) == 0
         assert mask2len(0xFF000000) == 8
@@ -357,7 +353,7 @@ class TestUnitConversions(object):
         assert mask2len(0xFFFFFFFF) == 32
 
     def test_len2imask(self):
-        len2imask = utils.len2imask
+        len2imask = ut.len2imask
 
         assert 0xFFFFFFFF == len2imask(0)
         assert 0x00FFFFFF == len2imask(8)
@@ -366,7 +362,7 @@ class TestUnitConversions(object):
         assert 0x00000000 == len2imask(32)
 
     def test_imask2len(self):
-        imask2len = utils.imask2len
+        imask2len = ut.imask2len
 
         assert imask2len(0xFFFFFFFF) == 0
         assert imask2len(0x00FFFFFF) == 8
