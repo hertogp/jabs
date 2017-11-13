@@ -4,20 +4,23 @@ ilf - compiler
 
 import os
 
-from .ilfparse import parse
-from .ilfilter import Ip4Filter
-from .helpers import Ival
+from .parse import parse
+from .core import Ival, Ip4Filter
 
 # -- GLOBALS
 NETS = {'any': set([Ival.from_pfx('any')])}      # name -> set(IP's)
 SRVS = {'any': set([Ival.from_portstr('any')])}  # name -> set(PORTSTR's)
 
 # -- AST = [(pos, stmt), ..]
+
+
 def ast_iter(ast, types=[]):
     'iterate across statements of requested types'
+    yield_all = len(types) == 0
     for pos, stmt in ast:
-        if stmt[0] in types:
+        if yield_all or stmt[0] in types:
             yield (pos, stmt)
+
 
 def ast_enum(ast, types=[]):
     'enumerate across statements of requested types'
@@ -26,13 +29,16 @@ def ast_enum(ast, types=[]):
         if yield_all or stmt[0] in types:
             yield (idx, pos, stmt)
 
+
 def ast_error(pos, err_type, stmt_type, msg):
     'small helper to easily create ERROR/WARNING stmts'
     return (pos, (err_type, stmt_type, msg))
 
+
 def ast_add(ast, pos, err_type, stmt_type, msg):
     'append an ERR_TYPE message to ast'
     ast.append((pos, (err_type, stmt_type, msg)))
+
 
 def ast_includes(ast):
     'expand include-statements in-place'
@@ -53,19 +59,22 @@ def ast_includes(ast):
                             seen[absname], absname)))
             continue
 
-        seen[absname] = '{}:{}:{}'.format(fname, linenr, col)  # record the inclusion
+        seen[absname] = '{}:{}:{}'.format(fname, linenr, col)  # record include
 
         try:
             with open(absname, 'r') as fp:
                 include_ast = parse(fp)
         except (IOError, OSError):
             ast[idx] = ((fname, linenr, 1),
-                        ('ERROR', 'INCLUDE', 'cannot find/read {}'.format(absname)))
+                        ('ERROR', 'INCLUDE', 'cannot find/read {}'.format(
+                            absname)))
             continue
 
         ast[idx:idx+1] = include_ast  # replace include(file) with its stmts
 
     return ast
+
+
 def _ivalify(lst):
     'return same list with IP, PORTSTR - values turned into Ivals'
     rv, errs = [], []  # in case of errors
@@ -87,6 +96,7 @@ def _ivalify(lst):
         raise ValueError(msg)
     return rv
 
+
 def ast_ivalify(ast):
     'turn IP- and PORTSTR-values into Ival-s'
     for idx, pos, stmt in ast_enum(ast, ['GROUP', 'RULE', 'RULEPLUS']):
@@ -107,10 +117,12 @@ def ast_ivalify(ast):
 
     return ast
 
+
 def ast_groups(ast):
     'return set of unique group definitions in ast'
     names = [stmt[1] for pos, stmt in ast_iter(ast, ['GROUP'])]
     return set(names)
+
 
 def ast_group(ast, group, _seen=None):
     'return a list of unique members of a group'
@@ -140,13 +152,13 @@ def ast_group(ast, group, _seen=None):
                 gname = item[1]
                 if gname in _seen:
                     ast_add(ast, pos, 'WARNING', 'GROUP',
-                             'circular ref for {!r} via {!r}'.format(gname,
-                                                                     group))
+                            'circular ref for {!r} via {!r}'.format(gname,
+                                                                    group))
                     continue
                 elif gname.lower() == 'any':
                     coll.add(('ANY', '0.0.0.0/0'))
                     ast_add(ast, pos, 'WARNING', 'GROUP',
-                             '{!r} is an alias for ANY'.format(group))
+                            '{!r} is an alias for ANY'.format(group))
                 else:
                     # empty groups are caught by chk_ast_norefs
                     for addition in ast_group(ast, gname, _seen):
@@ -157,6 +169,7 @@ def ast_group(ast, group, _seen=None):
 
     return list(coll)
 
+
 def ast_build_symbols(ast):
     'fill NETS and SRVS symbol tables'
     for grp in ast_groups(ast):
@@ -166,12 +179,13 @@ def ast_build_symbols(ast):
             elif typ == 'PORTSTR':
                 SRVS.setdefault(grp, set()).add(value)
             elif typ == 'ANY':
-                NETS.setdefault(grp, set()).add(Ival.from_pfx('any')) # any())
+                NETS.setdefault(grp, set()).add(Ival.from_pfx('any'))  # any())
                 SRVS.setdefault(grp, set()).add(Ival.from_portstr('any'))
             else:
                 raise ValueError('Illegal item {} in group {}'.format(typ,
                                                                       grp))
     return ast
+
 
 def ast_rules(ast):
     'expand elements of the defined rules'
@@ -182,6 +196,7 @@ def ast_rules(ast):
 
     return ast
 
+
 def ast_troubles(ast):
     'return list of printable errors and warnings, if any'
     rv = []
@@ -191,13 +206,16 @@ def ast_troubles(ast):
         rv.append((position, msg))
     return rv
 
+
 def ast_score(ast):
     'return (num_errors, num_warnings) in ast'
     errs = len(list(ast_iter(ast, ['ERROR'])))
     warn = len(list(ast_iter(ast, ['WARNING'])))
     return (errs, warn)
 
+
 #-- SEMANTICS
+
 
 def ast_semantics(ast):
     'run all chk_ast_funcs on ast'
@@ -208,6 +226,7 @@ def ast_semantics(ast):
         print('semantics:', semantics.__doc__)
         ast = semantics(ast)
     return ast
+
 
 def chk_ast_dangling(ast):
     'check for dangling RULEPLUS statements'
@@ -224,6 +243,7 @@ def chk_ast_dangling(ast):
         scope = stmt[1] if stmt[0] in ['ERROR', 'WARNING'] else stmt[0]
 
     return ast
+
 
 def chk_ast_norefs(ast):
     'ensure references to networks, services are valid'
@@ -247,18 +267,21 @@ def chk_ast_norefs(ast):
             raise ValueError('ref-check: unknown stmt type {}'.format(stmt[0]))
 
         if len(unrefs):
-            msg = 'undefined group{} {}'.format('s' if len(unrefs)>1 else '',
-                                                 ', '.join(unrefs))
+            msg = 'undefined group{} {}'.format('s' if len(unrefs) > 1 else '',
+                                                ', '.join(unrefs))
             ast[idx] = (pos, ('ERROR', stmt[0], msg))
 
     return ast
 
 
-#-- Compile
+# -- Compile
 # - return an IP4Filter by compiling a script
+
+
 def print_ast(ast):
     for pos, stmt in ast:
         print(pos, stmt)
+
 
 def compile(filename):
     'compile file into IP4Filter object'
