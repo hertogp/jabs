@@ -14,16 +14,18 @@ SRVS = {'any': set([Ival.from_portstr('any')])}  # name -> set(PORTSTR's)
 # -- AST = [(pos, stmt), ..]
 
 
-def ast_iter(ast, types=[]):
+def ast_iter(ast, types=None):
     'iterate across statements of requested types'
+    types = [] if types is None else types
     yield_all = len(types) == 0
     for pos, stmt in ast:
         if yield_all or stmt[0] in types:
             yield (pos, stmt)
 
 
-def ast_enum(ast, types=[]):
+def ast_enum(ast, types=None):
     'enumerate across statements of requested types'
+    types = [] if types is None else types
     yield_all = len(types) == 0
     for idx, (pos, stmt) in enumerate(ast):
         if yield_all or stmt[0] in types:
@@ -62,8 +64,8 @@ def ast_includes(ast):
         seen[absname] = '{}:{}:{}'.format(fname, linenr, col)  # record include
 
         try:
-            with open(absname, 'r') as fp:
-                include_ast = parse(fp)
+            with open(absname, 'r') as fhdl:
+                include_ast = parse(fhdl)
         except (IOError, OSError):
             ast[idx] = ((fname, linenr, 1),
                         ('ERROR', 'INCLUDE', 'cannot find/read {}'.format(
@@ -132,8 +134,8 @@ def ast_group(ast, group, _seen=None):
     coll = set([])
     target_group = group.lower()
 
-    for idx, pos, stmt in ast_enum(ast, ['GROUP']):
-        stmt_type, name, items = stmt
+    for pos, stmt in ast_iter(ast, ['GROUP']):
+        _, name, items = stmt
         if name.lower() != target_group:
             continue
 
@@ -189,6 +191,7 @@ def ast_build_symbols(ast):
 
 def ast_rules(ast):
     'expand elements of the defined rules'
+    # XXX: todo
     for pos, stmt in ast_iter(ast, ['RULE']):
         print('expand', stmt)
     for pos, stmt in ast_iter(ast, ['RULEPLUS']):
@@ -214,8 +217,9 @@ def ast_score(ast):
     return (errs, warn)
 
 
-#-- SEMANTICS
-
+# -- SEMANTICS
+# o RULEPLUS @ has STR's or PORTSTR's, else its an ERROR
+# o RULEPLUS <.>,<> has STR's or IP's, else its an ERROR
 
 def ast_semantics(ast):
     'run all chk_ast_funcs on ast'
@@ -279,14 +283,15 @@ def chk_ast_norefs(ast):
 
 
 def print_ast(ast):
+    'print out the abstract syntax tree'
     for pos, stmt in ast:
         print(pos, stmt)
 
 
-def compile(filename):
+def compile_file(filename):
     'compile file into IP4Filter object'
-    with open(filename, 'rt') as fh:
-        ast = parse(fh)            # parse master file
+    with open(filename, 'rt') as fhdl:
+        ast = parse(fhdl)          # parse master file
     ast = ast_includes(ast)        # parse included files
     ast = ast_ivalify(ast)         # turn IP, PORTSTR strings into Ival's
     ast = ast_build_symbols(ast)   # build NETS and SRVS tables

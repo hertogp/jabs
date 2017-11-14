@@ -92,14 +92,13 @@ def p_item(p):
 
 def p_rule(p):
     #  0           1     2   3     4   5     6     7     8   9      10
-    '''rule-stmt : TILDE tag group DIR group AT group COLON action json NEWLINE'''
+    'rule-stmt : TILDE tag group DIR group AT group COLON action json NEWLINE'
     # rule = (type tag addrs dir addrs srvs action tag json)
-    p[0] = _stmt(p,
-                         ('RULE', p[2], p[3], p[4], p[5], p[7], p[9], p[10]))
+    p[0] = _stmt(p, ('RULE', p[2], p[3], p[4], p[5], p[7], p[9], p[10]))
 
 
 def p_rule_json_error(p):
-    '''rule-stmt : TILDE tag group DIR group AT group COLON action error NEWLINE'''
+    'rule-stmt : TILDE tag group DIR group AT group COLON action error NEWLINE'
     print('json error', [type(x) for x in p])
     p[0] = _stmt(p, ('ERROR', 'RULE', 'JSON parse error'))
 
@@ -181,7 +180,8 @@ parser = yacc.yacc()
 
 def parse(fh):
     'parse a filter defintion file'
-    realfname = os.path.realpath(os.path.normpath(fh.name))
+    name = fh.name if hasattr(fh, 'name') else '__string__'
+    realfname = os.path.realpath(os.path.normpath(name))
     try:
         text = fh.read()
     except (IOError, OSError) as e:
