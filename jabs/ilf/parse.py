@@ -1,4 +1,6 @@
-# Ip Log Filter - parser
+'''
+Ip Log Filter - parser
+'''
 
 import os
 
@@ -17,14 +19,15 @@ def _stmt(p, stmt):
     linenr = p.lineno(1)
     err_tok = next((t for t in p if isinstance(t, lex.lex.LexToken)), None)
     column = err_tok.lexpos - p.lexpos(1) if err_tok else 1
-    position = (p.parser._filename, linenr, column)
+    position = (p.parser.ilf_filename, linenr, column)
     return (position, stmt)
 
 # -- productions
 
 
-def p_error(t):
-    if not t:
+def p_error(tok):
+    'global error handling'
+    if not tok:
         print('Unexpected EOF reached')
 
 
@@ -140,7 +143,7 @@ def p_ruleadd_error(p):
                '>': 'DESTINATION',
                '<': 'SOURCE',
                '<>': 'SRC/DST'
-               }
+              }
 
     p[0] = _stmt(p, ('ERROR', 'RULEPLUS',
                      '{} error'.format(err_elm.get(p[2], ''))))
@@ -168,22 +171,23 @@ def p_json(p):
 
 def p_empty(p):
     '''empty : '''
+    pass
 
 parser = yacc.yacc()
 
 
-def parse(fh):
+def parse(fhdl):
     'parse a filter defintion file'
-    name = fh.name if hasattr(fh, 'name') else '__string__'
+    name = fhdl.name if hasattr(fhdl, 'name') else '__string__'
     realfname = os.path.realpath(os.path.normpath(name))
     try:
-        text = fh.read()
+        text = fhdl.read()
     except (IOError, OSError) as e:
         print('fatal: error', repr(e))
         raise SystemExit(1)
 
-    parser._filename = realfname  # part of position in statements
-    lex.lexer.lineno = 1       # reset lineno when parsing a new file
+    parser.ilf_filename = realfname  # part of position in statements
+    lex.lexer.lineno = 1          # reset lineno when parsing a new file
     ast = parser.parse(text)
 
     return ast
