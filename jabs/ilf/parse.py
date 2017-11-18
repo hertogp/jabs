@@ -99,37 +99,31 @@ def p_rule(p):
 
 def p_rule_json_error(p):
     'rule-stmt : TILDE tag group DIR group AT group COLON action error NEWLINE'
-    print('json error', [type(x) for x in p])
     p[0] = _stmt(p, ('ERROR', 'RULE', 'JSON parse error'))
 
 
 def p_rule_action_error(p):
     '''rule-stmt : TILDE tag group DIR group AT group COLON error NEWLINE'''
-    print('action error', [x for x in p])
     p[0] = _stmt(p, ('ERROR', 'RULE', 'ACTION parse error'))
 
 
 def p_rule_service_error(p):
     '''rule-stmt : TILDE tag group DIR group AT error NEWLINE'''
-    print('action error', [x for x in p])
     p[0] = _stmt(p, ('ERROR', 'RULE', 'SERVICE parse error'))
 
 
 def p_rule_dest_error(p):
     '''rule-stmt : TILDE tag group DIR error NEWLINE'''
-    print('action error', [x for x in p])
     p[0] = _stmt(p, ('ERROR', 'RULE', 'DESTINATION parse error'))
 
 
 def p_rule_src_error(p):
     '''rule-stmt : TILDE tag error NEWLINE'''
-    print('action error', [x for x in p])
     p[0] = _stmt(p, ('ERROR', 'RULE', 'SOURCE parse error'))
 
 
 def p_rule_tag_error(p):
     '''rule-stmt : TILDE error NEWLINE'''
-    print('action error', [x for x in p])
     p[0] = _stmt(p, ('ERROR', 'RULE', 'TAG parse error'))
 
 

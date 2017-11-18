@@ -37,9 +37,14 @@ def ast_error(pos, err_type, stmt_type, msg):
     return (pos, (err_type, stmt_type, msg))
 
 
+def ast_element(pos, type_, id_, value):
+    'basic AST element (pos, (TYPE, ID, VALUE))'
+    return (pos, (type_, id_, value))
+
+
 def ast_add(ast, pos, err_type, stmt_type, msg):
     'append an ERR_TYPE message to ast'
-    ast.append((pos, (err_type, stmt_type, msg)))
+    ast.append(ast_element(pos, err_type, stmt_type, msg))
 
 
 def ast_includes(ast):
@@ -218,8 +223,6 @@ def ast_score(ast):
 
 
 # -- SEMANTICS
-# o RULEPLUS @ has STR's or PORTSTR's, else its an ERROR
-# o RULEPLUS <.>,<> has STR's or IP's, else its an ERROR
 
 def ast_semantics(ast):
     'run all chk_ast_funcs on ast'
@@ -235,13 +238,10 @@ def ast_semantics(ast):
 def chk_ast_dangling(ast):
     'check for dangling RULEPLUS statements'
     scope = None  # determines current scope (if any)
-    print('dangling', len(ast))
     for idx, pos, stmt in ast_enum(ast):
-        print('chk_dangling', scope, idx, stmt)
         if stmt[0] == 'BLANK':
             continue
         if stmt[0] == 'RULEPLUS' and scope not in ['RULE', 'RULEPLUS']:
-            print('-'*80)
             ast[idx] = (pos, ('ERROR', 'RULEPLUS',
                               'not in scope of a RULE'))
         scope = stmt[1] if stmt[0] in ['ERROR', 'WARNING'] else stmt[0]
@@ -251,9 +251,18 @@ def chk_ast_dangling(ast):
 
 def chk_ast_norefs(ast):
     'ensure references to networks, services are valid'
-    no_net = lambda x: x[1] not in NETS
-    no_srv = lambda x: x[1] not in SRVS
-    no_ref = lambda x: x[1] not in NETS and x[1] not in SRVS
+    def no_net(x):
+        'check if name is not a NET-name'
+        return x[1] not in NETS
+
+    def no_srv(x):
+        'check if name is nog a SRV-name'
+        return x[1] not in SRVS
+
+    def no_ref(x):
+        'check that name is neither a NET-name nor a SRV-name'
+        return x[1] not in NETS and x[1] not in SRVS
+
     for idx, pos, stmt in ast_enum(ast, ['GROUP', 'RULE', 'RULEPLUS']):
         unrefs = []
         if stmt[0] in ['GROUP']:
@@ -278,6 +287,40 @@ def chk_ast_norefs(ast):
     return ast
 
 
+def chk_stmt_args(ast):
+    'check validity of arguments supplied to statements in ast'
+    # XXX implement these checks:
+    # o RULEPLUS @ has STR's or PORTSTR's, else its an ERROR
+    # o RULEPLUS <.>,<> has STR's or IP's, else its an ERROR
+    # o RULE, same checks for src, dst and services
+    NETARGS = ('IP', 'STR')
+    SRVARGS = ('PORTSTR', 'STR')
+    ALLARGS = set([*NETARGS, *SRVARGS])
+    for idx, pos, stmt in ast_enum(ast, ['GROUP', 'RULE', 'RULEPLUS']):
+        illegal = []
+        if stmt[0] in ['GROUP']:
+            illegal = [x[1] for x in stmt[2] if x[0] not in ALLARGS]
+        elif stmt[0] == 'RULE':
+            illegal = [x[1] for x in stmt[2] if x[0] not in NETARGS]
+            illegal.extend(x[1] for x in stmt[4] if x[0] not in NETARGS)
+            illegal.extend(x[1] for x in stmt[5] if x[0] not in SRVARGS)
+        elif stmt[0] == 'RULEPLUS':
+            if stmt[1] == '@':
+                illegal = [x[1] for x in stmt[2] if x[0] not in SRVARGS]
+            else:
+                illegal = [x[1] for x in stmt[2] if x[0] not in NETARGS]
+        else:
+            raise ValueError('stmt args check: unknown stmt type {}'.format(
+                stmt[1]))
+
+        if len(illegal):
+            msg = 'illegal args: {}'.format(', '.join(str(i) for i in illegal))
+            ast[idx] = (pos, ('ERROR', stmt[0], msg))
+
+    return ast
+    pass
+
+
 # -- Compile
 # - return an IP4Filter by compiling a script
 
@@ -285,7 +328,8 @@ def chk_ast_norefs(ast):
 def print_ast(ast):
     'print out the abstract syntax tree'
     for pos, stmt in ast:
-        print(pos, stmt)
+        print('{}:{}:{}'.format(
+            os.path.relpath(pos[0]), pos[1], pos[2]), stmt)
 
 
 def compile_file(filename):
