@@ -2,14 +2,67 @@
 Test jabs.ifl.Ival
 '''
 
-import random
 import sys
 sys.path.insert(0, '..')
 sys.path.insert(0, '.')
-
 import pytest
+from jabs.ilf.core import Ival, Ival2
 
-from jabs.ilf import Ival
+
+# -- Test Ival2 - set operations
+
+def test_set_equal_ivals():
+    'equal Ivals turn up as 1 entry in a set'
+    # invalid Ivals
+    values = (0, 0, 0)
+    i0 = Ival2(values)
+    i1 = Ival2(values)
+    assert len(set([i0, i1])) == 1
+
+    # valid Pfx Ivals
+    i0 = Ival2('any')
+    i1 = Ival2('any')
+    assert len(set([i0, i1])) == 1
+
+    # valid Portstr Ivals
+    i0 = Ival2('any/any')
+    i1 = Ival2('any/any')
+    assert len(set([i0, i1])) == 1
+
+
+def test_set_diff_ivals():
+    'unequal Ivals turn up as entries in a set'
+    i0, i1 = Ival2((1, 0, 2**16)), Ival2((1, 1, 2**16))
+    assert len(set([i0, i1])) == 2
+
+    i0, i1 = Ival2((1, 0, 0)), Ival2((1, 1, 0))
+    assert len(set([i0, i1])) == 2
+
+    i0, i1 = Ival2('128.192.224.240/28'), Ival2('128.192.224.0/28')
+    assert len(set([i0, i1])) == 2
+
+    i0, i1 = Ival2('80/tcp'), Ival2('80/udp')
+    assert len(set([i0, i1])) == 2
+
+
+def test_ival_hashing():
+    'ivals can be hashed'
+    i0 = Ival2('0.0.0.0/0')
+    i1 = Ival2('0.0.0.0/0')  # a new different Ival with same values
+    d = {i0: 99}
+    assert d[i1] == 99  # i0 == i1 -> same hash result
+
+
+def test_ival_equality():
+    'ivals can be equal or not'
+    i0 = Ival2('10.10.10.10/24')
+
+    i1 = Ival2('10.10.10.10/24')
+    assert i0 == i1
+
+    i1 = Ival2('10.10.10.0/32')
+    assert i0 != i1
+
 
 class TestIval_hashing(object):
     'test Ival can be hashed safely'

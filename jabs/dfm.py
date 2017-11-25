@@ -66,14 +66,13 @@ import argparse
 import re
 import logging
 import configparser
-from functools import wraps, partial
 
 import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from jabs.ilf import Ip4Filter, Ip4Protocol, Ip4Service, Ival
-import jabs.utils as ut
+from ilf import Ip4Filter, Ip4Protocol, Ip4Service, Ival
+import utils as ut
 
 #-- Logging
 
@@ -114,8 +113,8 @@ def log_switch(logger_lvl=None, console_lvl=None, console_fmt=None):
     org_console_fmt = console_hdlr.formatter
 
     # - set new values
-    logger_lvl = logger_lvl if logger_lvl else org_logger_lvl
-    console_lvl = console_lvl if console_lvl else org_console_lvl
+    logger_lvl = logger_lvl if logger_lvl else org_logger_level
+    console_lvl = console_lvl if console_lvl else org_console_level
     console_fmt = console_fmt if console_fmt else org_console_fmt
 
     log.setLevel(logger_lvl)
