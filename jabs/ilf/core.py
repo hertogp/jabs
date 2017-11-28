@@ -374,7 +374,10 @@ class Ival2(object):
             return
 
         # Sooo, value must be a string
-        value = value.lower().strip()
+        try:
+            value = value.lower().strip()
+        except:
+            raise ValueError('invalid Ival2 value {!r}'.format(value))
 
         if value == 'any':
             self.type, self.start, self.length = self.IP, 0, 2**32
@@ -429,7 +432,12 @@ class Ival2(object):
             self.type = self.PORTSTR
             err = 'invalid portstring {!r}'
             try:
-                x = [y.strip() for y in re.split('-|/', value)]
+                x = value.split('/')      # port(range)/proto-name
+                if len(x) != 2:
+                    raise ValueError(err.format(value))
+                x[0:1] = x[0].split('-')  # only split port(range) on '-'
+                x = [y.strip() for y in x]
+
                 if len(x) == 1:
                     if x[0] != 'any':
                         raise ValueError(err.format(value))
@@ -439,9 +447,6 @@ class Ival2(object):
 
                 elif len(x) == 2:
                     # port/proto or any/proto
-                    if '/' not in value:
-                        raise ValueError(err.format(value))
-
                     proto_num = self.ipp.getprotobyname(x[1])
                     if x[0] == 'any':
                         length = 2**16
@@ -456,16 +461,18 @@ class Ival2(object):
                     return  # 0.proto.p2.p1
 
                 elif len(x) == 3:
-                    # start-stop/proto
-                    if '/' not in value or '-' not in value:
+                    # start-stop/proto-name
+                    try:
+                        proto_num = self.ipp.getprotobyname(x[2])
+                    except ValueError:
                         raise ValueError(err.format(value))
-                    proto_num = self.ipp.getprotobyname(x[2])
                     start, stop = int(x[0]), int(x[1])
-                    length = stop - start + 1
                     if start > stop:
+                        start, stop = stop, start
+                    length = stop - start + 1
+                    if start < 0 or start > 2**16 - 1:
                         raise ValueError(err.format(value))
-                    if start > stop or start < 0 or start > 2**16 - 1 or\
-                            stop < 0 or stop > 2**16-1:
+                    if stop < 0 or stop > 2**16 - 1:
                         raise ValueError(err.format(value))
                     self.start = proto_num * 2**16 + start
                     self.length = length
@@ -497,7 +504,7 @@ class Ival2(object):
 
         elif self.type == self.PORTSTR:
             if self.length == 2**32:
-                return 'any'
+                return 'any/any'
             elif self.length == 2**16:
                 ports = 'any'
             elif self.length == 1:
@@ -645,10 +652,11 @@ class Ival2(object):
             raise ValueError('invalid ipv4 protocol number {!r}'.format(proto))
         if port < 0 or port > 2**16 - 1:
             raise ValueError('invalid ipv4 port number {!r}'.format(port))
-        rv = Ival2('any')
-        rv.type = cls.PORTSTR
-        rv.start = port + proto * 2**16
-        rv.length = 1
+        # rv = Ival2('any')
+        rv = Ival2((cls.PORTSTR, port + proto * 2**16, 1))
+        # rv.type = cls.PORTSTR
+        # rv.start = port + proto * 2**16
+        # rv.length = 1
         return rv
 
     @classmethod
