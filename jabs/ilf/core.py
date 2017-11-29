@@ -574,9 +574,9 @@ class Ival2(object):
         'raise ValueError if invalid, return True otherwise'
         if self.type not in self.TYPES:
             raise ValueError('Invalid Ival type {!r}'.format(self.type))
-        if self.start < 0 or self.start > 2**32:
+        if self.start < 0 or self.start > 2**32 - 1:
             raise ValueError('Invalid Ival start {!r}'.format(self.start))
-        if self.length < 0 or self.length > 2**32:
+        if self.length < 0 or self.length > 2**32 - 1:
             raise ValueError('Invalid Ival length {!r}'.format(self.length))
         return True
 
@@ -594,6 +594,8 @@ class Ival2(object):
 
     def broadcast(self):
         'return new ival for broadcast prefix'
+        # TODO: Ival2('0/0').broadcast() == Ival2('255.255.255.255') ??
+        # should broadcast yield an address/32 or address/pfxlen ??
         if self.type == self.IP:
             rv = Ival2()
             rv.type = self.IP
@@ -658,6 +660,17 @@ class Ival2(object):
         # rv.start = port + proto * 2**16
         # rv.length = 1
         return rv
+
+    @classmethod
+    def _power_of_2(cls, x):
+        'return Ival x as list of Ivals that are powers of 2'
+        # used to create a list of PORTSTR's that can be formatted as pfx's
+        # for use in a PyTricia tree for lookup.
+        pass
+
+    def portstraspfx(self):
+        'given a PORTSTR, return a list of 1 or more prefixes'
+        pass
 
     @classmethod
     def _combine(cls, x, y):

@@ -46,7 +46,7 @@ def atoi(ipaddr):
 
 
 def itoa(ipint):
-    'return integer as dotquad ipv4 address'
+    'return integer as dotquad ipv4 address if possible, 0 otherwise'
     return socket.inet_ntoa(struct.pack('>L', ipint))
 
 
@@ -58,10 +58,13 @@ def pfxlen(mask):
 
 def dotq2pfx(addr, mask):
     'turn network from dotted quads addr, mask into addr/len'
-    addr, mask = atoi(addr), atoi(mask)
-    netw = addr & mask
-    pfxl = 32 - int(math.log(2**32 - mask)/math.log(2))
-    return "%s/%s" % (itoa(netw), pfxl)
+    try:
+        addr, mask = atoi(addr), atoi(mask)
+        netw = addr & mask
+        pfxl = 32 - int(math.log(2**32 - mask)/math.log(2))
+        return "%s/%s" % (itoa(netw), pfxl)
+    except Exception:
+        return '-'
 
 
 # -- Options

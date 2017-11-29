@@ -53,7 +53,7 @@ def g_grep(pattern, lines):
     cpattern = [re.compile(p) for p in pattern]
     for line in lines:
         for p in cpattern:
-            if p.search(line): 
+            if p.search(line):
                 yield line
                 break
 
