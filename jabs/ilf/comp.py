@@ -8,8 +8,8 @@ from .parse import parse
 from .core import Ival, Ip4Filter
 
 # -- GLOBALS
-NETS = {'any': set([Ival.from_pfx('any')])}      # name -> set(IP's)
-SRVS = {'any': set([Ival.from_portstr('any')])}  # name -> set(PORTSTR's)
+NETS = {'any': set([Ival('any')])}      # name -> set(IP's)
+SRVS = {'any': set([Ival('any/any')])}  # name -> set(PORTSTR's)
 
 # -- AST = [(pos, stmt), ..]
 
@@ -336,7 +336,7 @@ def compile_file(filename):
     'compile file into IP4Filter object'
     with open(filename, 'rt') as fhdl:
         ast = parse(fhdl)          # parse master file
-    ast = ast_includes(ast)        # parse included files
+    ast = ast_includes(ast)        # include & parse include(files)
     ast = ast_ivalify(ast)         # turn IP, PORTSTR strings into Ival's
     ast = ast_build_symbols(ast)   # build NETS and SRVS tables
     ast = ast_semantics(ast)       # check validity of ast

@@ -77,284 +77,6 @@ class Ip4Service(object):
 
 
 class Ival(object):
-    'helper class in (uint, num) conversions to/from port-ranges & pfxs'
-    # ipv4 only
-    ipp = Ip4Protocol()
-
-    def __init__(self, start=0, length=0):
-        self.start = start    # unsigned int for a.b.c.d or 0.proto.p1.p2
-        self.length = length  # ival length
-
-    def __repr__(self):
-        return 'Ival({}, {})'.format(self.start, self.length)
-
-    def __str__(self):
-        return '({}, {})'.format(self.start, self.length)
-
-    def __len__(self):
-        return self.length
-
-    def __contains__(self, other):
-        return self.start <= other.start and\
-            self.start + self.length >= other.start + other.length
-
-    def __eq__(self, other):
-        return self.start == other.start and self.length == other.length
-
-    def __hash__(self):
-        'needed because of __eq__, donot modify obj when hashed'
-        return hash((self.start, self.length))
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
-    def __lt__(self, other):
-        return self.start < other.start
-
-    def __lte__(self, other):
-        return self.start <= other.start
-
-    def __gt__(self, other):
-        return self.start > other.start + other.length
-
-    def __gte__(self, other):
-        return self.start >= other.start + other.length
-
-    def values(self):
-        return (self.start, self.length)
-
-    def to_portstr(self):
-        'return any, any/proto, port/proto or port-port/proto from interval'
-        if self.length == 2**32:
-            return 'any'
-        elif self.length == 2**16:
-            ports = 'any'
-        elif self.length == 1:
-            ports = str(self.start & 0xFFFF)
-        else:
-            start = self.start & 0xFFFF
-            ports = '{}-{}'.format(start, start + self.length - 1)
-
-        proto = int((self.start // 2**16) & 0xFF)
-        name = self.ipp.getnamebyproto(proto)
-        return '{}/{}'.format(ports, name)
-
-    def to_pfx(self):
-        'turn ival (start, length) into pfx string a.b.c.d/e'
-        if self.length == 2**32:
-            return '0.0.0.0/0'  # 'any', length 2**32 means any, not length 0
-        elif self.length == 1:
-            plen = ''  # /32 is omitted
-        else:
-            plen = '/{}'.format(32 - int(math.log(1+self.length)//math.log(2)))
-
-        d1 = (self.start // 2**24) & 0xFF
-        d2 = (self.start // 2**16) & 0xFF
-        d3 = (self.start // 2**8) & 0xFF
-        d4 = (self.start) & 0xFF
-
-        return '{}.{}.{}.{}{}'.format(d1, d2, d3, d4, plen)
-
-    def is_any(self):
-        return self.length == 2**32  # any-interval has max length
-
-    def network(self):
-        'return new ival for this-network prefix'
-        mask = 2**32 - self.length
-        return Ival(self.start & mask, self.length)
-
-    def broadcast(self):
-        'return new ival for broadcast prefix'
-        imask = 2**32 ^ (self.length - 1)
-        return Ival(self.start | imask, self.length)
-
-    def address(self):
-        'return address part of an interval (usually a pfx ival)'
-        return Ival(self.start, 1).to_pfx()
-
-    @classmethod
-    def from_pfx(cls, pfxstr):
-        'turn any or a.b.c.d/e into ival (start, length)'
-        # allow for shorthands and /e defaults to /32 if absent
-        err = 'invalid ipv4 prefix string {!r}'
-        pfx = pfxstr.lower()  # keep pfxstr as-is for exceptions (if any)
-        if pfx == 'any':
-            return cls(0, 2**32)   # i.e. 0/0
-
-        if pfx.count('.') > 3:
-            raise ValueError(err.format(pfxstr))
-        try:
-            # options /pfx-len, defaults to /32 if absent
-            x = pfx.split('/', 1)
-            plen = 32 if len(x) == 1 else int(x[1])
-            if plen < 0 or plen > 32:
-                raise ValueError(err.format(pfxstr))
-
-            # x = list(map(int, filter(None, x[0].split('.'))))
-            # donot allow double dots or trailing dots
-            x = list(map(int, x[0].split('.')))
-            if len(x) < 1 or len(x) > 4:
-                raise ValueError(err.format(pfxstr))
-            elif len(x) < 4:
-                x = (x + [0, 0, 0, 0])[0:4]
-            for digit in x:
-                if digit < 0 or digit > 255:
-                    raise ValueError(err.format(pfxstr))
-
-            # only after checking any digits, return 0/0 if plen is 0
-            if plen == 0:
-                return cls(0, 2**32)
-            length = 2**(32-plen)
-
-            start = x[0] * 2**24 + x[1] * 2**16 + x[2] * 2**8 + x[3]
-
-        except (AttributeError, ValueError):
-            raise ValueError(err.format(pfxstr))
-
-        return cls(start, length)
-
-    @classmethod
-    def from_portproto(cls, port, proto):
-        'return port-interval by numbers'
-        err = '({}, {}) invalid ipv4 port and/or protocol number'
-        try:  # accept stringified port,proto nrs and turn 'm into ints
-            port = int(port)
-            proto = int(proto)
-        except ValueError:
-            raise ValueError(err.format(port, proto))
-
-        if proto < 0 or proto > 255:
-            raise ValueError(err.format(port, proto))
-        if port < 0 or port > 2**16 -1:
-            raise ValueError(err.format(port, proto))
-        return cls(port + proto * 2**16, 1)
-
-    @classmethod
-    def from_portstr(cls, portstr):
-        'turn start-stop/proto into start-uint, length'
-        # valid portstr include: any, [port-]port/proto, any/proto
-        err = 'invalid portstring {!r}'
-        try:
-            x = [y.strip() for y in re.split('-|/', portstr.lower())]
-            if len(x) == 1:
-                if x[0] != 'any':
-                    raise ValueError(err.format(portstr))
-                return cls(0, 2**32)  # any port, any protocol
-
-            elif len(x) == 2:
-                # port/proto or any/proto
-                if '/' not in portstr:
-                    raise ValueError(err.format(portstr))
-
-                proto_num = cls.ipp.getprotobyname(x[1])
-                if x[0].lower() == 'any':
-                    length = 2**16
-                    base = 0
-                else:
-                    length = 1
-                    base = int(x[0])
-                    if base < 0 or base > 2**16 - 1:
-                        raise ValueError(err.format(portstr))
-                return cls(proto_num * 2**16 + base, length)  # 0.proto.p2.p1
-
-            elif len(x) == 3:
-                # start-stop/proto
-                if '/' not in portstr or '-' not in portstr:
-                    raise ValueError(err.format(portstr))
-                proto_num = cls.ipp.getprotobyname(x[2])
-                start, stop = int(x[0]), int(x[1])
-                length = stop - start + 1
-                if start > stop:
-                    raise ValueError(err.format(portstr))
-                if start > stop or start < 0 or start > 2**16 - 1 or\
-                        stop < 0 or stop > 2**16-1:
-                    raise ValueError(err.format(portstr))
-                return cls(proto_num * 2**16 + start, length)
-
-        except (AttributeError, ValueError):
-            # eg if portstr is not a string or int(port-part) fails
-            raise ValueError(err.format(portstr))
-
-    @classmethod
-    def any(cls):
-        return cls(0, 2**32)
-
-    @classmethod
-    def _combine(cls, x, y, pfx=False):
-        'return new combined ival if possible, None otherwise'
-        # intervals can be combined iff:
-        # - one lies inside the other, or
-        # - overlap each other exactly, or
-        # - are adjacent to each other (pfx=True enforces equal lengths)
-        if y is None:
-            return cls(*x.values())
-        if x is None:
-            return cls(*y.values())
-        if x == y:
-            return cls(*x.values())
-        if x in y:
-            return cls(*y.values())
-        if y in x:
-            return cls(*x.values())
-        if x.start + x.length == y.start:
-            if pfx and x.length != y.length:
-                return None
-            return cls(x.start, x.length + y.length)
-        if y.start + y.length == x.start:
-            if pfx and x.length != y.length:
-                return None
-            return cls(y.start, y.length + x.length)
-
-        return None  # no joy
-
-    @classmethod
-    def _summary(cls, ivals, pfx=False):
-        'summarize a port- or prefix-intervals into minimum set of intervals'
-        # reverse since this sorts uint, then on length in ascending order
-        if pfx:
-            heap = list(reversed(sorted(ival.network() for ival in ivals)))
-        else:
-            heap = list(reversed(sorted(ivals)))
-
-        # reduce heap to minimum amount of intervals
-        rv = []
-        while len(heap):
-            x = heap.pop()
-            y = heap.pop() if len(heap) else None
-            if y:
-                z = cls._combine(x, y, pfx)  # z is None if not combined
-                if z:
-                    heap.append(z)  # combined range back on heap
-                    continue        # start again
-                else:
-                    heap.append(y)  # push back for later combine attempt
-
-            y = rv.pop() if len(rv) else None
-            if y:
-                z = cls._combine(x, y, pfx) # y is None when x combines x+y
-                if z:
-                    heap.append(z)  # combined range back on heap
-                else:
-                    rv.append(y)  # could not combine, both goto rv and
-                    rv.append(x)  # make sure to keep rv ordering intact
-
-            else:
-                rv.append(x)
-
-        return rv
-
-    @classmethod
-    def pfx_summary(cls, ivals):
-        'convenience method wrapping Ival.summary(.., pfx=True) class method'
-        return cls._summary(ivals, pfx=True)
-
-    @classmethod
-    def port_summary(cls, ivals):
-        'convenience method wrapping Ival.summary(.., pfx=False) class method'
-        return cls._summary(ivals, pfx=False)
-
-
-class Ival2(object):
     'helper class that abstracts PORTSTR or IP'
     INVALID, IP, PORTSTR = (0, 1, 2)  # types of Ival's
     TYPE = {0: 'INVALID', 1: 'IP', 2: 'PORTSTR'}
@@ -363,13 +85,27 @@ class Ival2(object):
     ipp = Ip4Protocol()  # ipv4 only
 
     def __init__(self, value=None):
-        if value is None:  # an INVALID Ival2
+        if value is None:  # init an INVALID Ival
             self.type = self.start = self.length = 0
             return
 
         if isinstance(value, (tuple, list)):
-            if len(value) != 3:
-                raise ValueError('Invalid values {!r}'.format(value))
+            if len(value) == 2:
+                self.type = Ival.PORTSTR  # value = (port, protocolnr)
+                port, proto = value
+                err = '{!r} invalid ipv4 port and/or protocol numbers'
+                try:  # ensure port, proto are ints
+                    port = int(port)
+                    proto = int(proto)
+                except ValueError:
+                    raise ValueError(err.format(value))
+                if proto < 0 or proto > 255 or port < 0 or port > 2**16 - 1:
+                    raise ValueError(err.format(value))
+                self.start, self.length = (port + proto * 2**16, 1)
+                return
+            elif len(value) != 3:
+                raise ValueError(err.format(value))
+            # blindly accept any 3-tuple & trust caller knows what she's doing
             self.type, self.start, self.length = value
             return
 
@@ -377,7 +113,7 @@ class Ival2(object):
         try:
             value = value.lower().strip()
         except:
-            raise ValueError('invalid Ival2 value {!r}'.format(value))
+            raise ValueError('invalid Ival value {!r}'.format(value))
 
         if value == 'any':
             self.type, self.start, self.length = self.IP, 0, 2**32
@@ -403,7 +139,6 @@ class Ival2(object):
                     raise ValueError(err.format(value))
 
                 # donot allow double dots or trailing dots
-                ipstr = x[0]
                 x = list(map(int, x[0].split('.')))
                 if len(x) < 1 or len(x) > 4:
                     raise ValueError(err.format(value))
@@ -420,9 +155,9 @@ class Ival2(object):
                 else:
                     self.length = 2**(32-plen)
                     self.start = x[0]*2**24 + x[1]*2**16 + x[2]*2**8 + x[3]
-                    import socket, struct
-                    long = struct.unpack(">L", socket.inet_aton(ipstr))
-                    print(self.start, long)
+                    # import socket, struct
+                    # long = struct.unpack(">L", socket.inet_aton(ipstr))
+                    # print(self.start, long)
                 return
             except (AttributeError, ValueError):
                 raise ValueError(err.format(value))
@@ -520,7 +255,6 @@ class Ival2(object):
         else:
             return 'invalid'
 
-
     def __len__(self):
         return self.length
 
@@ -529,46 +263,34 @@ class Ival2(object):
             self.start <= other.start and\
             self.start + self.length >= other.start + other.length
 
-    def __eq__(self, other):
-        return self.values() == other.values()
-
     def __hash__(self):
         'needed because of __eq__, donot modify obj when hashed'
         return hash(self.values())
 
     def __ne__(self, other):
-        return not self.__eq__(other)
+        return self.values() != other.values()
+
+    def __eq__(self, other):
+        return self.values() == other.values()
 
     def __lt__(self, other):
-        if self.type != other.type:
-            raise ValueError('incomparable types {!r}, {!r}'.format(
-                self.type, other.type))
-        return self.start < other.start
+        return self.values() < other.values()
 
-    def __lte__(self, other):
-        if self.type != other.type:
-            raise ValueError('incomparable types {!r}, {!r}'.format(
-                self.type, other.type))
-        return self.start <= other.start
+    def __le__(self, other):
+        'self starts to the left of other or is smaller'
+        return self.values() <= other.values()
 
     def __gt__(self, other):
-        if self.type != other.type:
-            raise ValueError('incomparable types {!r}, {!r}'.format(
-                self.type, other.type))
-        return self.start > other.start + other.length
+        'self starts to the right of other'
+        return self.values() > other.values()
 
-    def __gte__(self, other):
-        if self.type != other.type:
-            raise ValueError('incomparable types {!r}, {!r}'.format(
-                self.type, other.type))
-        return self.start >= other.start + other.length
+    def __ge__(self, other):
+        'self starts to the right of other'
+        return self.values() >= other.values()
 
     def values(self, values=None):
-        'get or set the values of the ival object'
-        if values is None:
-            return (self.type, self.start, self.length)
-        self.type, self.start, self.length = values
-        return self
+        'get the values of the ival object'
+        return (self.type, self.start, self.length)
 
     def is_valid(self):
         'raise ValueError if invalid, return True otherwise'
@@ -582,9 +304,9 @@ class Ival2(object):
 
     def network(self):
         'return new ival for this-network prefix'
-        # Used in combine/summary -> masked ival with org length!
+        # keeps the prefix (ival) length
         if self.type == self.IP:
-            rv = Ival2()
+            rv = Ival()
             mask = 2**32 - self.length
             rv.type = self.IP
             rv.start = self.start & mask
@@ -594,10 +316,10 @@ class Ival2(object):
 
     def broadcast(self):
         'return new ival for broadcast prefix'
-        # TODO: Ival2('0/0').broadcast() == Ival2('255.255.255.255') ??
+        # TODO: Ival('0/0').broadcast() == Ival('255.255.255.255') ??
         # should broadcast yield an address/32 or address/pfxlen ??
         if self.type == self.IP:
-            rv = Ival2()
+            rv = Ival()
             rv.type = self.IP
             imask = 2**32 ^ (self.length - 1)
             rv.start = self.start | imask
@@ -608,7 +330,7 @@ class Ival2(object):
     def address(self):
         'return new ival for address part of the interval'
         if self.type == self.IP:
-            rv = Ival2()
+            rv = Ival()
             rv.type = self.IP
             rv.start = self.start
             rv.length = 1
@@ -641,68 +363,63 @@ class Ival2(object):
         return self.length == 2**32  # any-interval has max length
 
     @classmethod
-    def from_portproto(cls, port, proto):
-        'return port-interval by numbers'
-        err = '({}, {}) invalid ipv4 port and/or protocol number'
-        try:  # accept stringified port,proto nrs and turn 'm into ints
-            port = int(port)
-            proto = int(proto)
-        except ValueError:
-            raise ValueError(err.format(port, proto))
+    def _splice(cls, ival):
+        'break up a ival into a list of pfx friendly ranges'
+        if ival.length == 1:
+            return [ival]
+        rv = []
+        start, length = ival.start, ival.length
+        maxx = start + length
+        while start < maxx:
+            if start % 2:  # not a multiple of 2, so add ival of len 1
+                rv.append((start, 1))
+                length -= 1
+                start += 1
+                continue
+            if length == 1:  # multiple of 2, but still length is 1
+                rv.append((start, length))
+                break
+            ivlen = 2**int(math.log(length, 2))
+            if ivlen == length:  # we're done!
+                rv.append((start, ivlen))
+                break
+            rv.append((start, ivlen))
+            start += ivlen
+            length -= ivlen
 
-        if proto < 0 or proto > 255:
-            raise ValueError('invalid ipv4 protocol number {!r}'.format(proto))
-        if port < 0 or port > 2**16 - 1:
-            raise ValueError('invalid ipv4 port number {!r}'.format(port))
-        # rv = Ival2('any')
-        rv = Ival2((cls.PORTSTR, port + proto * 2**16, 1))
-        # rv.type = cls.PORTSTR
-        # rv.start = port + proto * 2**16
-        # rv.length = 1
-        return rv
-
-    @classmethod
-    def _power_of_2(cls, x):
-        'return Ival x as list of Ivals that are powers of 2'
-        # used to create a list of PORTSTR's that can be formatted as pfx's
-        # for use in a PyTricia tree for lookup.
-        pass
-
-    def portstraspfx(self):
-        'given a PORTSTR, return a list of 1 or more prefixes'
-        pass
+        return [cls((ival.type, x, y)) for x, y in rv]
 
     @classmethod
     def _combine(cls, x, y):
         'return new combined ival if possible, None otherwise'
-        # intervals can be combined iff:
-        # - one lies inside the other, or
-        # - overlap each other exactly, or
-        # - are adjacent to each other (pfx=True enforces equal lengths)
+        # PORTSTR intervals can be combined if adjacent or overlapping
+        # ditto for IP intervals, plus starting point is a multiple of 2
         if y is None:
-            return cls().values(x.values())
+            return cls(x.values())
         if x is None:
-            return cls().values(y.values())
+            return cls(y.values())
         if x.type != y.type:
             return None
         if x == y:
-            return cls().values(x.values())
+            return cls(x.values())
+        # x starts to the left of y
+        x, y = (x, y) if x < y else (y, x)
         if x in y:
-            return cls().values(y.values())
-        if y in x:
-            return cls().values(x.values())
+            return cls(y.values())
         if x.type == cls.IP and x.length != y.length:
             return None
         if x.start + x.length == y.start:
-            return cls().values((x.type, x.start, x.length + y.length))
-        if y.start + y.length == x.start:
-            return cls().values((y.type, y.start, y.length + x.length))
+            if x.type == cls.PORTSTR or x.start % 2 == 0:
+                return cls((x.type, x.start, x.length + y.length))
+        if x.type == cls.PORTSTR and x.start + x.length > y.start:
+            ivlen = max(x.start + x.length, y.start + y.length) - x.start
+            return cls((x.type, x.start, ivlen))
 
         return None  # no joy
 
     @classmethod
-    def _summary(cls, ivals):
-        'summarize a homogeous list of port-intervals -or- prefix-intervals'
+    def summary(cls, ivals):
+        'summarize a (heterogeneous) list of port/prefix-intervals'
         # reverse since this sorts on uint, then on length in ascending order
         heap = list(reversed(sorted(ivals)))
         rv = []
@@ -735,13 +452,22 @@ class Ival2(object):
     def pfx_summary(cls, ivals):
         'summarize the IP-prefixes in ivals'
         pfxs = [i.network() for i in ivals if i.type == i.IP]
-        return cls._summary(pfxs)
+        return cls.summary(pfxs)
 
     @classmethod
     def port_summary(cls, ivals):
         'summarize the PORTSTR-ivals in ivals'
         ports = [i for i in ivals if i.type == i.PORTSTR]
-        return cls._summary(ports)
+        return cls.summary(ports)
+
+    @classmethod
+    def portpfx_summary(cls, ivals):
+        'summarize PORTSTR-ivals as if they were IP'
+        ports = []
+        for p in ivals:
+            ports.extend(cls._splice(p))
+        ports = [cls((cls.IP, x.start, x.length)) for x in ports]
+        return cls.summary(ports)
 
 
 class Ip4Filter(object):

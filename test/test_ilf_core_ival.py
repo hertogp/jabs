@@ -6,116 +6,116 @@ import sys
 sys.path.insert(0, '..')
 sys.path.insert(0, '.')
 import pytest
-from jabs.ilf.core import Ival, Ival2
+from jabs.ilf.core import Ival
 
 
-# -- Test Ival2 - set operations
+# -- Test Ival - set operations
 
 def test_ival_in_set1():
     'equal Ivals turn up as 1 entry in a set'
     # invalid Ivals
     values = (0, 0, 0)
-    i0 = Ival2(values)
-    i1 = Ival2(values)
+    i0 = Ival(values)
+    i1 = Ival(values)
     assert len(set([i0, i1])) == 1
 
     # valid Pfx Ivals
-    i0 = Ival2('any')
-    i1 = Ival2('any')
+    i0 = Ival('any')
+    i1 = Ival('any')
     assert len(set([i0, i1])) == 1
 
     # valid Portstr Ivals
-    i0 = Ival2('any/any')
-    i1 = Ival2('any/any')
+    i0 = Ival('any/any')
+    i1 = Ival('any/any')
     assert len(set([i0, i1])) == 1
 
 
 def test_ival_in_set2():
     'unequal Ivals turn up as entries in a set'
-    i0, i1 = Ival2((1, 0, 2**16)), Ival2((1, 1, 2**16))
+    i0, i1 = Ival((1, 0, 2**16)), Ival((1, 1, 2**16))
     assert len(set([i0, i1])) == 2
 
-    i0, i1 = Ival2((1, 0, 0)), Ival2((1, 1, 0))
+    i0, i1 = Ival((1, 0, 0)), Ival((1, 1, 0))
     assert len(set([i0, i1])) == 2
 
-    i0, i1 = Ival2('128.192.224.240/28'), Ival2('128.192.224.0/28')
+    i0, i1 = Ival('128.192.224.240/28'), Ival('128.192.224.0/28')
     assert len(set([i0, i1])) == 2
 
-    i0, i1 = Ival2('80/tcp'), Ival2('80/udp')
+    i0, i1 = Ival('80/tcp'), Ival('80/udp')
     assert len(set([i0, i1])) == 2
 
 
 def test_ival_hash1():
     'ivals can be hashed'
-    for i0, i1 in [(Ival2('0.0.0.0/0'), Ival2('0.0.0.0/0')),
-                   (Ival2('255.255.255.255/32'), Ival2('255.255.255.255/32'))]:
+    for i0, i1 in [(Ival('0.0.0.0/0'), Ival('0.0.0.0/0')),
+                   (Ival('255.255.255.255/32'), Ival('255.255.255.255/32'))]:
         d = {i0: 99}
         assert d[i1] == d[i0]  # i1 should index the same as i0
 
-    i0, i1 = Ival2('any'), Ival2('0/0')
+    i0, i1 = Ival('any'), Ival('0/0')
     d = {i0: 99}
     assert d[i1] == d[i0]
 
 
 def test_ival_hash2():
     'ivals can be hashed'
-    for i0, i1 in [(Ival2('80/tcp'), Ival2('80/tcp')),
-                   (Ival2('65535/udp'), Ival2('65535/udp'))]:
+    for i0, i1 in [(Ival('80/tcp'), Ival('80/tcp')),
+                   (Ival('65535/udp'), Ival('65535/udp'))]:
         d = {i0: 99}
         assert d[i1] == d[i0]  # i1 should index the same as i0
 
 
 def test_ival_equality():
     'ivals can be equal or not'
-    assert Ival2('0.0.0.0/0') == Ival2('any')
-    assert Ival2('10.10.10.10/32') == Ival2('10.10.10.10')
-    assert Ival2('10.10.10.10/0') == Ival2('any')
-    assert Ival2('any/tcp') == Ival2('0-65535/tcp')
-    assert Ival2('any/udp') == Ival2('0-65535/udp')
+    assert Ival('0.0.0.0/0') == Ival('any')
+    assert Ival('10.10.10.10/32') == Ival('10.10.10.10')
+    assert Ival('10.10.10.10/0') == Ival('any')
+    assert Ival('any/tcp') == Ival('0-65535/tcp')
+    assert Ival('any/udp') == Ival('0-65535/udp')
     with pytest.raises(ValueError):
-        Ival2('0-65535/any')
+        Ival('0-65535/any')
 
 
 def test_ival_inequality():
-    'a prefix Ival2 is never equal to portstr Ival2'
-    assert Ival2('any') != Ival2('any/any')
+    'a prefix Ival is never equal to portstr Ival'
+    assert Ival('any') != Ival('any/any')
 
 
 def test_ival_pfx_any():
     'any is a prefix shorthand for ALL ip addresses'
-    assert Ival2('any').type == Ival2.IP
-    assert Ival2('any') == Ival2((Ival2.IP, 0, 2**32))
-    assert str(Ival2('any')) == '0.0.0.0/0'
+    assert Ival('any').type == Ival.IP
+    assert Ival('any') == Ival((Ival.IP, 0, 2**32))
+    assert str(Ival('any')) == '0.0.0.0/0'
 
 
 def test_ival_portstr_any():
     'any/any is a portstr shorthand for any port, any protocol'
     # 0.proto.portx.porty/length -> start at 0, length 2**24 but we do
     # 2**32 to mask all bits in the portstr_as_pfx
-    assert Ival2('any/any').type == Ival2.PORTSTR
-    assert Ival2('any/any').values() == (Ival2.PORTSTR, 0, 2**32)
-    assert str(Ival2('any/any')) == 'any/any'
+    assert Ival('any/any').type == Ival.PORTSTR
+    assert Ival('any/any').values() == (Ival.PORTSTR, 0, 2**32)
+    assert str(Ival('any/any')) == 'any/any'
 
-    assert Ival2('any/tcp').type == Ival2.PORTSTR
-    assert Ival2('any/tcp').values() == (Ival2.PORTSTR, 6 * 2**16, 2**16)
-    assert str(Ival2('any/tcp')) == 'any/tcp'
-    assert str(Ival2((Ival2.PORTSTR, 6 * 2**16, 2**16))) == 'any/tcp'
+    assert Ival('any/tcp').type == Ival.PORTSTR
+    assert Ival('any/tcp').values() == (Ival.PORTSTR, 6 * 2**16, 2**16)
+    assert str(Ival('any/tcp')) == 'any/tcp'
+    assert str(Ival((Ival.PORTSTR, 6 * 2**16, 2**16))) == 'any/tcp'
 
     # only 255 has protocol name reserverd ... hmmm..
-    assert Ival2('any/reserved') == Ival2((Ival2.PORTSTR, 255 * 2**16, 2**16))
-    assert str(Ival2('any/reserveD')) == 'any/reserved'
+    assert Ival('any/reserved') == Ival((Ival.PORTSTR, 255 * 2**16, 2**16))
+    assert str(Ival('any/reserveD')) == 'any/reserved'
 
 
 def test_ival_pfx_shorthand():
     'prefix shorthands'
-    assert Ival2('224.224.224.224') == Ival2('224.224.224.224/32')
-    assert Ival2('192.192/16') == Ival2('192.192.0.0/16')
-    assert Ival2('0/0') == Ival2('0.0.0.0/0')
-    assert Ival2('0.0/0') == Ival2('0.0.0.0/0')
-    assert Ival2('0.0.0/0') == Ival2('0.0.0.0/0')
-    assert Ival2('255/8') == Ival2('255.0.0.0/8')
-    assert Ival2('255.255/16') == Ival2('255.255.0.0/16')
-    assert Ival2('255.255.255/24') == Ival2('255.255.255.0/24')
+    assert Ival('224.224.224.224') == Ival('224.224.224.224/32')
+    assert Ival('192.192/16') == Ival('192.192.0.0/16')
+    assert Ival('0/0') == Ival('0.0.0.0/0')
+    assert Ival('0.0/0') == Ival('0.0.0.0/0')
+    assert Ival('0.0.0/0') == Ival('0.0.0.0/0')
+    assert Ival('255/8') == Ival('255.0.0.0/8')
+    assert Ival('255.255/16') == Ival('255.255.0.0/16')
+    assert Ival('255.255.255/24') == Ival('255.255.255.0/24')
 
 
 def test_ival_pfx_good():
@@ -132,7 +132,7 @@ def test_ival_pfx_good():
              ]
 
     for pfx, proper in cases:
-        assert str(Ival2(pfx)) == proper
+        assert str(Ival(pfx)) == proper
 
 
 def test_ival_pfx_bad():
@@ -154,7 +154,7 @@ def test_ival_pfx_bad():
 
     for invalid in invalids:
         with pytest.raises(ValueError):
-            Ival2(invalid)
+            Ival(invalid)
 
 
 def test_ival_pfx_attrs():
@@ -167,35 +167,10 @@ def test_ival_pfx_attrs():
     ]
 
     for pfx, netpfx, netaddr, bcastaddr in valids:
-        ival = Ival2(pfx)
+        ival = Ival(pfx)
         assert str(ival.network()) == netpfx
         assert str(ival.network().address()) == netaddr
         assert str(ival.broadcast().address()) == bcastaddr
-
-
-def test_ival_pfx_summary():
-    'test summarization of prefixes'
-    #            pfx-list,                     single-summary-prefix
-    valids = [(['1.1.1.0/24', '1.1.2.0/24'],   '1.1.1.0/23'),
-              (['1.1.1.0/25', '1.1.1.128/25'], '1.1.1.0/24'),
-              (['1.1.2.128/25', '1.1.2.0/25'], '1.1.2.0/24'),
-              (['1.1.1.0/25', '1.1.2.128/25',
-                '1.1.1.128/25', '1.1.2.0/25'], '1.1.1.0/23'),
-
-              # all hosts 1.0.0.0 - 1.0.0.255 => 1.0.0.0/24
-              (['1.0.0.{}'.format(x) for x in range(0, 256)],
-               '1.0.0.0/24'),
-              # hosts 1.0.0.0 - 1.0.1.255 => 1.0.0.0/23
-              (list('1.0.0.{}'.format(x) for x in range(0, 256)) +
-               list('1.0.1.{}'.format(x) for x in range(0, 256)),
-               '1.0.0.0/23')
-              ]
-
-    for pfxs, summ in valids:
-        ivals = [Ival2(pfx) for pfx in pfxs]
-        isumm = Ival2.pfx_summary(ivals)
-        assert len(isumm) == 1
-        assert isumm[0] == Ival2(summ)
 
 
 def test_ival_portstr_good():
@@ -203,7 +178,7 @@ def test_ival_portstr_good():
     # ival start = 0.proto.port2.port1 = protonr * 2*16 + port nr
     for nr in [0, 1, 128, 365, 2*10-1, 65535]:
         port = '{}/sctp'.format(nr)  # all 1 port only, so length == 1
-        assert Ival2(port) == Ival2((Ival2.PORTSTR, 132 * 2**16 + nr, 1))
+        assert Ival(port) == Ival((Ival.PORTSTR, 132 * 2**16 + nr, 1))
 
 
 def test_bad_portstrings():
@@ -215,7 +190,7 @@ def test_bad_portstrings():
                 ]
     for invalid in invalids:
         with pytest.raises(ValueError):
-            Ival2(invalid)
+            Ival(invalid)
 
 
 def test_portstrings_with_range():
@@ -227,15 +202,15 @@ def test_portstrings_with_range():
     ]
 
     for portstr, start, length in cases:
-        assert Ival2(portstr) == Ival2((Ival2.PORTSTR, start, length))
-        assert str(Ival2(portstr)) == portstr
+        assert Ival(portstr) == Ival((Ival.PORTSTR, start, length))
+        assert str(Ival(portstr)) == portstr
 
     # border cases, where to_portstr() returns saner portstring
-    assert Ival2('0-0/tcp') == Ival2((Ival2.PORTSTR, 6 * 2**16, 1))
-    assert str(Ival2('0-0/tcp')) == '0/tcp'
+    assert Ival('0-0/tcp') == Ival((Ival.PORTSTR, 6 * 2**16, 1))
+    assert str(Ival('0-0/tcp')) == '0/tcp'
 
-    assert Ival2('0-65535/tcp') == Ival2((Ival2.PORTSTR, 6 * 2**16, 2**16))
-    assert str(Ival2('0-65535/tcp')) == 'any/tcp'
+    assert Ival('0-65535/tcp') == Ival((Ival.PORTSTR, 6 * 2**16, 2**16))
+    assert str(Ival('0-65535/tcp')) == 'any/tcp'
 
 
 def test_portstr_ranges():
@@ -248,8 +223,8 @@ def test_portstr_ranges():
              ]
 
     for portstr in cases:
-        print(portstr, Ival2(portstr), Ival2(portstr).values())
-        assert str(Ival2(portstr)) == portstr
+        print(portstr, Ival(portstr), Ival(portstr).values())
+        assert str(Ival(portstr)) == portstr
 
 
 def test_two_ranges():
@@ -261,8 +236,8 @@ def test_two_ranges():
              ]
 
     for ports, ranges in cases:
-        ivals = [Ival2(x) for x in ports]
-        summ = Ival2.port_summary(ivals)
+        ivals = [Ival(x) for x in ports]
+        summ = Ival.port_summary(ivals)
         assert len(summ) == len(ranges)
         # ranges contains the correct list of summary ranges
         assert all(str(x) in ranges for x in summ)
@@ -270,12 +245,119 @@ def test_two_ranges():
 
 def test_portstr_swapped_start_stop():
     'higher-lower/protocol comes out as lower-higher/protocol'
-    assert str(Ival2('50-25/udp')) == '25-50/udp'
-    assert str(Ival2('65535-0/tcp')) == 'any/tcp'
+    assert str(Ival('50-25/udp')) == '25-50/udp'
+    assert str(Ival('65535-0/tcp')) == 'any/tcp'
+
+
+def test_ival_compare_lt():
+    'ival is smaller if it starts to the left or is smaller'
+    # ival starting to the left is always smaller
+    assert Ival('1.1.0.0/24') < Ival('1.1.1.0/32')
+    assert Ival('0-100/tcp') < Ival('1/tcp')
+
+    # with same start, compare based on lentg
+    assert Ival('1.1.0.0/24') < Ival('1.1.0.0/23')
+
+    # invalid < cls.IP < cls.PORTSTR
+    assert Ival() < Ival('0.0.0.0')
+    assert Ival('255.255.255.255') < Ival('0/hopopt')
+    assert Ival('0/0') < Ival('0/tcp')
+
+
+def test_ival_compare_le():
+    'ival is smaller if it starts to the left or is smaller'
+    # smaller start
+    assert Ival('1.1.0.0/24') <= Ival('1.1.1.0/32')
+
+    # same start, smaller lenth
+    assert Ival('1.1.0.0/24') <= Ival('1.1.0.0/23')
+    assert Ival('1-10/tcp') <= Ival('1-11/tcp')
+
+    # due to type
+    assert Ival() <= Ival('0.0.0.0')
+    assert Ival('255.255.255.255') <= Ival('0/hopopt')
+    assert Ival('0/0') <= Ival('0/tcp')
+
+
+def test_ival_compare_gt():
+    # due to type
+    assert Ival('0.0.0.0') > Ival()
+    assert Ival('0/udp') > Ival('255.255.255.255')
+
+    # due to start
+    assert Ival('0.0.0.1/32') > Ival('0.0.0.0/24')
+    assert Ival('10/tcp') > Ival('0-65535/tcp')
+
+    # due to protocol number
+    assert Ival('1/udp') > Ival('1/tcp')
+
+
+def test_ival_compare_ge():
+    # due to type
+    assert Ival('0.0.0.0') >= Ival()
+    assert Ival('0/udp') >= Ival('255.255.255.255')
+
+    # due to start
+    assert Ival('0.0.0.1/32') >= Ival('0.0.0.0/24')
+    assert Ival('10/tcp') >= Ival('0-65535/tcp')
+
+    # due to protocol number
+    assert Ival('1/udp') >= Ival('1/tcp')
+
+
+def test_ival_sorting():
+    'ivals sort on type, then on start then on length'
+    ivals = [Ival(i) for i in '9/tcp 1.1.1.0/23 10/tcp 1.1.1.0/24'.split()]
+    svals = [Ival(i) for i in '1.1.1.0/24 1.1.1.0/23 9/tcp 10/tcp'.split()]
+    assert list(sorted(ivals)) == svals
+
+
+def test_ival_pfx_summary1():
+    'test summarization of prefixes'
+    #            pfx-list,                     single-summary-prefix
+    valids = [(['1.1.1.0/24', '1.1.2.0/24'],   '1.1.1.0/23'),
+              (['1.1.1.0/25', '1.1.1.128/25'], '1.1.1.0/24'),
+              (['1.1.2.128/25', '1.1.2.0/25'], '1.1.2.0/24'),
+
+              (['1.1.1.0/25', '1.1.2.128/25',
+                '1.1.1.128/25', '1.1.2.0/25'], '1.1.1.0/23'),
+
+              # all hosts 1.0.0.0 - 1.0.0.255 => 1.0.0.0/24
+              (['1.0.0.{}'.format(x) for x in range(0, 256)],
+               '1.0.0.0/24'),
+
+              # hosts 1.0.0.0 - 1.0.1.255 => 1.0.0.0/23
+              (list('1.0.0.{}'.format(x) for x in range(0, 256)) +
+               list('1.0.1.{}'.format(x) for x in range(0, 256)),
+               '1.0.0.0/23')
+              ]
+
+    for pfxs, summ in valids:
+        ivals = [Ival(pfx) for pfx in pfxs]
+        isumm = Ival.pfx_summary(ivals)
+        assert len(isumm) == 1
+        assert isumm[0] == Ival(summ)
+
+
+def test_ival_pfx_summary2():
+    'test summarization of prefixes'
+    ips = map(Ival, ['0.0.0.0', '0.0.0.1', '0.0.0.2', '0.0.0.3'])
+    assert Ival.pfx_summary(ips) == [Ival('0.0.0.0/30')]
+
+    ips = map(Ival, ['0.0.0.0', '0.0.0.1', '0.0.0.2'])
+    assert Ival.pfx_summary(ips) == [Ival('0.0.0.0/31'), Ival('0.0.0.2')]
+
+
+def test_ival_pfx_summary3():
+    ips = map(Ival, ['0.0.0.9', '0.0.0.10', '0.0.0.11'])
+    assert Ival.pfx_summary(ips) == [Ival('0.0.0.9'), Ival('0.0.0.10/31')]
+
+    ips = map(Ival, ['0.0.0.10', '0.0.0.11', '0.0.0.12'])
+    assert Ival.pfx_summary(ips) == [Ival('0.0.0.10/31'), Ival('0.0.0.12')]
 
 
 def test_ival_port_summary():
-    'test summarization of port strings'
+    'port summary of adjacent intervals'
     valids = [(['80/tcp', '81/tcp', '82/tcp'], '80-82/tcp'),
               (['80-82/tcp', '84/tcp', '83/tcp'], '80-84/tcp'),
 
@@ -291,16 +373,39 @@ def test_ival_port_summary():
               ]
 
     for ports, summ in valids:
-        ivals = [Ival2(port) for port in ports]
-        isumm = Ival2.port_summary(ivals)
+        ivals = [Ival(port) for port in ports]
+        isumm = Ival.port_summary(ivals)
         assert len(isumm) == 1
-        assert isumm[0] == Ival2(summ)
+        assert isumm[0] == Ival(summ)
 
 
-def test_ival_port_pfx_summ():
+def test_ival_port_summary1():
+    'port summary of adjacent intervals'
     ivals = ['0-64/tcp', '65-127/tcp', '128-255/tcp']
-    summ = Ival2._summary([Ival2(i) for i in ivals])
+    summ = Ival.summary([Ival(i) for i in ivals])
     assert len(summ) == 1
+    assert str(summ[0]) == '0-255/tcp'
+
+
+def test_ival_port_summary2():
+    'port summary of overlapping intervals'
+    ivals = ['0-7/tcp', '3-8/tcp', '5-10/tcp']
+    summ = Ival.port_summary([Ival(i) for i in ivals])
+    assert len(summ) == 1
+    assert str(summ[0]) == '0-10/tcp'
+
+    ivals = ['0-7/tcp', '1-2/tcp', '2-5/tcp']
+    summ = Ival.port_summary([Ival(i) for i in ivals])
+    assert len(summ) == 1
+    assert str(summ[0]) == '0-7/tcp'
+
+
+def test_ival_mixed_summary():
+    'mixed ivals can be summarized as well'
+    ivals = ['1.1.1.0/24', '0-12/tcp', '1.1.0.0/24', '13-15/tcp']
+    mixed = [Ival(i) for i in ivals]
+
+    assert Ival.summary(mixed) == [Ival('1.1.0.0/23'), Ival('0-15/tcp')]
 
 
 def tst_ival_portproto_good():
@@ -309,14 +414,14 @@ def tst_ival_portproto_good():
               (65535, 255),  # max port for protocol reserved
               ]
 
-    for port, proto in valids:
-        Ival2.from_portproto(port, proto)
+    for port_proto in valids:
+        Ival(port_proto)
 
 
 def test_ival_portproto_known():
-    assert '80/tcp' == str(Ival2.from_portproto(80, 6))
-    assert Ival2.from_portproto(3216, 6) == Ival2('3216/tcp')
-    assert '3216/tcp' == str(Ival2.from_portproto(3216, 6))
+    assert '80/tcp' == str(Ival((80, 6)))
+    assert Ival((3216, 6)) == Ival('3216/tcp')
+    assert '3216/tcp' == str(Ival((3216, 6)))
 
 
 def test_bad_portprotos():
@@ -327,5 +432,22 @@ def test_bad_portprotos():
                 ]
 
     with pytest.raises(ValueError):
-        for port, proto in invalids:
-            Ival2.from_portproto(port, proto)
+        for port_proto in invalids:
+            Ival(port_proto)
+
+
+def test_ival_splicing():
+    'PORTSTRings need to be spliced into pfx-ranges'
+    # Ival's port_as_pfx_summ needs to turn port-ranges into
+    # prefix-like intervals for use with PyTricia
+    ival = Ival('0-9/tcp')
+    assert Ival._splice(ival) == [Ival('0-7/tcp'), Ival('8-9/tcp')]
+
+    ival = Ival('0-15/tcp')
+    assert Ival._splice(ival) == [Ival('0-15/tcp')]
+
+    ival = Ival('0-12/tcp')
+    assert Ival._splice(ival) == [Ival('0-7/tcp'), Ival('8-11/tcp'),
+                                   Ival('12/tcp')]
+
+
