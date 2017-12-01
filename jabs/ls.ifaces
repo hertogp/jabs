@@ -198,7 +198,6 @@ for g in g_cut(' ', grepped, range(15)):
         DTA[HOST][IFACE]['status'] = g[0]
 
     elif IFACE and cmd(g, 'encapsulation dot1q'):
-        print >> sys.stderr, 'encap', g
         DTA[HOST][IFACE]['vlan'] = g[2]
 
     elif IFACE and cmd(g, 'switchport access vlan'):
