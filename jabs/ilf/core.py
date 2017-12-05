@@ -2,12 +2,31 @@
 ilf core utilities
 '''
 
+import sys
 import re
 import math
+from itertools import chain
 
 import pytricia as pt
 
 from .numbers import IP4PROTOCOLS, IP4SERVICES
+
+
+# -- Helpers
+
+
+def lowest_bit(num):
+    bit, low = -1, (num & -num)
+    if not low:
+        return 0
+    while(low):
+        low >>= 1
+        bit += 1
+    return bit
+
+
+def binarr(n):
+    return [n >> i & 1 for i in range(n.bit_length() - 1, -1, -1)]
 
 
 class Ip4Protocol(object):
@@ -53,27 +72,23 @@ class Ip4Service(object):
 
     def getportsbyserv(self, name):
         'translate service name (eg https) to a list of portstrings'
-        err = 'unknown ipv4 service name {!r}'
-        rv = self._service_toports(name.lower(), None)
-        if rv is None:
-            raise ValueError(err.format(name))
+        rv = self._service_toports.get(name.lower(), [])
         return rv
 
     def getservbyport(self, portstr):
-        'translate a portstring to a service namet'
-        err = 'invalid ipv4 protocol port string'
+        'translate a portstring to a service name'
         rv = self._port_toservice.get(portstr.lower(), '')
         return rv
 
     def set_service(self, service, portstrings):
         'set known ports for a service, eg http->[80/tcp]'
         # TODO: check validity, remove spaces etc ...
-        service = service.lower()
-        portstrings = [portstr.lower() for portstr in portstrings]
+        service = service.strip().lower()
+        portstrings = [portstr.strip().lower() for portstr in portstrings]
 
-        self._service_toports[service] = portstrings.copy()
+        self._service_toports[service] = portstrings
         for portstr in portstrings:
-            self._port_toservice[portstr.lower()] = service
+            self._port_toservice[portstr] = service
 
 
 class Ival(object):
@@ -149,12 +164,12 @@ class Ival(object):
                         raise ValueError(err.format(value))
 
                 # only after checking any digits, return 0/0 if plen is 0
-                if plen == 0:
-                    self.start = 0
-                    self.length = 2**32
-                else:
-                    self.length = 2**(32-plen)
-                    self.start = x[0]*2**24 + x[1]*2**16 + x[2]*2**8 + x[3]
+                # if plen == 0:
+                #     self.start = 0
+                #     self.length = 2**32
+                # else:
+                self.length = 2**(32-plen)
+                self.start = x[0]*2**24 + x[1]*2**16 + x[2]*2**8 + x[3]
                     # import socket, struct
                     # long = struct.unpack(">L", socket.inet_aton(ipstr))
                     # print(self.start, long)
@@ -271,6 +286,9 @@ class Ival(object):
         return self.values() != other.values()
 
     def __eq__(self, other):
+        # max intervals (len is 2**32) are equal regardless of start value
+        if self.type == other.type and self.length == 2**32:
+            return other.length == self.length
         return self.values() == other.values()
 
     def __lt__(self, other):
@@ -288,6 +306,17 @@ class Ival(object):
         'self starts to the right of other'
         return self.values() >= other.values()
 
+    def __iter__(self):
+        'iterate through the interval with new ivals of len=1'
+        self.idx = -1
+        return self
+
+    def __next__(self):
+        self.idx += 1
+        if self.idx < self.length:
+            return Ival((self.type, self.start + self.idx, 1))
+        raise StopIteration
+
     def values(self, values=None):
         'get the values of the ival object'
         return (self.type, self.start, self.length)
@@ -302,40 +331,30 @@ class Ival(object):
             raise ValueError('Invalid Ival length {!r}'.format(self.length))
         return True
 
+    def prefix(self):
+        'return an new IP-typed Ival for this ival'
+        ival = self.network()
+        ival.type = Ival.IP
+        return ival
+
     def network(self):
-        'return new ival for this-network prefix'
-        # keeps the prefix (ival) length
-        if self.type == self.IP:
-            rv = Ival()
-            mask = 2**32 - self.length
-            rv.type = self.IP
-            rv.start = self.start & mask
-            rv.length = self.length
-            return rv
-        raise ValueError('type {!r} not a prefix'.format(self.TYPE[self.type]))
+        'return new ival for the first value'
+        # keeps the prefix (ival) length, only mask start if its IP
+        mask = 2**32 - self.length
+        start = self.start & mask if self.type == Ival.IP else self.start
+        return Ival((self.type, start, self.length))
 
     def broadcast(self):
-        'return new ival for broadcast prefix'
+        'return new ival for the last value'
         # TODO: Ival('0/0').broadcast() == Ival('255.255.255.255') ??
         # should broadcast yield an address/32 or address/pfxlen ??
-        if self.type == self.IP:
-            rv = Ival()
-            rv.type = self.IP
-            imask = 2**32 ^ (self.length - 1)
-            rv.start = self.start | imask
-            rv.length = self.length
-            return rv
-        raise ValueError('type {!r} not a prefix'.format(self.TYPE[self.type]))
+        imask = self.length - 1
+        start = self.start | imask if self.type == Ival.IP else self.start
+        return Ival((self.type, start, self.length))
 
     def address(self):
-        'return new ival for address part of the interval'
-        if self.type == self.IP:
-            rv = Ival()
-            rv.type = self.IP
-            rv.start = self.start
-            rv.length = 1
-            return rv
-        raise ValueError('type {!r} not a prefix'.format(self.TYPE[self.type]))
+        'return new ival with length 1 for start value'
+        return Ival((self.type, self.start, 1))
 
     def mask(self):
         'return the mask as quad dotted string'
@@ -351,7 +370,7 @@ class Ival(object):
     def imask(self):
         'return the inverse mask as quad dotted string'
         if self.type == self.IP:
-            imask = 2**32 ^ (self.length - 1)
+            imask = self.length - 1
             d1 = (imask // 2**24) & 0xFF
             d2 = (imask // 2**16) & 0xFF
             d3 = (imask // 2**8) & 0xFF
@@ -363,37 +382,33 @@ class Ival(object):
         return self.length == 2**32  # any-interval has max length
 
     @classmethod
-    def _splice(cls, ival):
-        'break up a ival into a list of pfx friendly ranges'
-        if ival.length == 1:
-            return [ival]
+    def splice(cls, ival):
+        'break up a ival into a list of prefix-like ranges'
         rv = []
         start, length = ival.start, ival.length
         maxx = start + length
         while start < maxx:
-            if start % 2:  # not a multiple of 2, so add ival of len 1
-                rv.append((start, 1))
-                length -= 1
-                start += 1
-                continue
-            if length == 1:  # multiple of 2, but still length is 1
-                rv.append((start, length))
-                break
-            ivlen = 2**int(math.log(length, 2))
-            if ivlen == length:  # we're done!
-                rv.append((start, ivlen))
-                break
-            rv.append((start, ivlen))
-            start += ivlen
-            length -= ivlen
+            lbit = lowest_bit(start)
+            hbit = length.bit_length()
+            maxlen = 2**lbit
+            newlen = maxlen if length > maxlen else 2**(hbit-1)
+            rv.append((start, newlen))
+            start, length = start + newlen, length - newlen
 
-        return [cls((ival.type, x, y)) for x, y in rv]
+        return [Ival((ival.type, x, y)) for x, y in rv]
+
+    def as_networks(self):
+        'turn this ival into a list of valid IP prefixes'
+        pfxs = Ival.splice(self)
+        for pfx in pfxs:
+            pfx.type = Ival.IP
+        return pfxs
 
     @classmethod
-    def _combine(cls, x, y):
-        'return new combined ival if possible, None otherwise'
+    def combine(cls, x, y):
+        'if possible, return a combined ival, None otherwise'
         # PORTSTR intervals can be combined if adjacent or overlapping
-        # ditto for IP intervals, plus starting point is a multiple of 2
+        # ditto for IP intervals, plus adjacent ivals must have same length
         if y is None:
             return cls(x.values())
         if x is None:
@@ -420,14 +435,15 @@ class Ival(object):
     @classmethod
     def summary(cls, ivals):
         'summarize a (heterogeneous) list of port/prefix-intervals'
-        # reverse since this sorts on uint, then on length in ascending order
+        # reverse since this sorts on type, start & length in ascending order
+        # originals go back on the heap, new ivals go onto rv
         heap = list(reversed(sorted(ivals)))
         rv = []
         while len(heap):
             x = heap.pop()
             y = heap.pop() if len(heap) else None
             if y:
-                z = cls._combine(x, y)  # z is None if not combined
+                z = cls.combine(x, y)  # z is None if not combined
                 if z:
                     heap.append(z)  # combined range back on heap
                     continue        # start again
@@ -436,7 +452,7 @@ class Ival(object):
 
             y = rv.pop() if len(rv) else None
             if y:
-                z = cls._combine(x, y)  # y is None when x combines x+y
+                z = cls.combine(x, y)  # y is None when x combines x+y
                 if z:
                     heap.append(z)  # combined range back on heap
                 else:
@@ -446,28 +462,33 @@ class Ival(object):
             else:
                 rv.append(x)
 
-        return rv
+        return [Ival(i.values()) for i in rv]  # ensure new objs are returned
 
     @classmethod
     def pfx_summary(cls, ivals):
         'summarize the IP-prefixes in ivals'
-        pfxs = [i.network() for i in ivals if i.type == i.IP]
-        return cls.summary(pfxs)
+        subset = [i.network() for i in ivals if i.type == cls.IP]
+        return cls.summary(subset)
 
     @classmethod
     def port_summary(cls, ivals):
-        'summarize the PORTSTR-ivals in ivals'
-        ports = [i for i in ivals if i.type == i.PORTSTR]
-        return cls.summary(ports)
+        'summarize the PORTSTR-ings in ivals'
+        subset = [i for i in ivals if i.type == cls.PORTSTR]
+        return cls.summary(subset)
 
     @classmethod
     def portpfx_summary(cls, ivals):
-        'summarize PORTSTR-ivals as if they were IP'
+        'summarize PORTSTR-ivals and as if they were prefixes'
         ports = []
         for p in ivals:
-            ports.extend(cls._splice(p))
-        ports = [cls((cls.IP, x.start, x.length)) for x in ports]
-        return cls.summary(ports)
+            if p.type == cls.PORTSTR:
+                ports.extend(cls.splice(p))
+        for p in ports:
+            p.type = cls.IP  # switch types to get pfx treatment
+        summ = cls.summary(ports)
+        for p in summ:
+            p.type = cls.PORTSTR  # switch back to portstr type
+        return summ
 
 
 class Ip4Filter(object):
@@ -496,8 +517,9 @@ class Ip4Filter(object):
     def __len__(self):
         return len(self._act)
 
-    def _set_rid(self, rid, tbl, pfx):
+    def _set_rid(self, rid, tbl, ival):
         'set rule-id on single prefix in specific table'
+        pfx = str(ival)
         try:
             if tbl.has_key(pfx):        # find the exact prefix
                 tbl[pfx].add(rid)       # add to existing prefix
@@ -505,7 +527,7 @@ class Ip4Filter(object):
                 tbl[pfx] = set([rid])   # it's a new prefix
 
             # propagate rid to more specifics
-            for kid in tbl.children(pfx):  # propagate rid to the more specifics
+            for kid in tbl.children(pfx):  # propagate rid to more specifics
                 tbl[kid].add(rid)
 
             # adopt rid's matched by less specific parent (if any)
@@ -514,7 +536,8 @@ class Ip4Filter(object):
                 tbl[pfx] = tbl[pfx].union(tbl[parent])
 
         except ValueError as e:
-            log.error('invalid prefix? {} :{}'.format(pfx, repr(e)))
+            print('invalid prefix? {}: {}'.format(pfx, repr(e)),
+                  file=sys.stderr)
             sys.exit(1)
 
     def set_nomatch(self, nomatch):
@@ -525,14 +548,15 @@ class Ip4Filter(object):
     def add(self, rid, srcs, dsts, ports, action='', dta={}):
         'add a new rule or just add src and/or dst to an existing rule'
         summary = Ival.pfx_summary
-        for ival in summary(x.network() for x in map(Ival.from_pfx, srcs)):
-            self._set_rid(rid, self._src, ival.to_pfx())
+        for ival in summary(Ival(x).network() for x in srcs):
+            self._set_rid(rid, self._src, ival)
 
-        for ival in summary(x.network() for x in map(Ival.from_pfx, dsts)):
-            self._set_rid(rid, self._dst, ival.to_pfx())
+        for ival in summary(Ival(x).network() for x in dsts):
+            self._set_rid(rid, self._dst, ival)
 
-        for ival in summary(x.network() for x in map(Ival.from_portstr, ports)):
-            self._set_rid(rid, self._dpp, ival.to_pfx())
+        ports_as_pfxs = chain(*(Ival(x).as_networks() for x in ports))
+        for ival in ports_as_pfxs:
+            self._set_rid(rid, self._dpp, ival)
 
         fmt = 'warn: {}, {} swaps {!r} for new {!r}'
 

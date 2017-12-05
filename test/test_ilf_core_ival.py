@@ -86,6 +86,7 @@ def test_ival_pfx_any():
     assert Ival('any').type == Ival.IP
     assert Ival('any') == Ival((Ival.IP, 0, 2**32))
     assert str(Ival('any')) == '0.0.0.0/0'
+    assert Ival('any').is_any()
 
 
 def test_ival_portstr_any():
@@ -95,6 +96,7 @@ def test_ival_portstr_any():
     assert Ival('any/any').type == Ival.PORTSTR
     assert Ival('any/any').values() == (Ival.PORTSTR, 0, 2**32)
     assert str(Ival('any/any')) == 'any/any'
+    assert Ival('any/any').is_any()
 
     assert Ival('any/tcp').type == Ival.PORTSTR
     assert Ival('any/tcp').values() == (Ival.PORTSTR, 6 * 2**16, 2**16)
@@ -104,6 +106,13 @@ def test_ival_portstr_any():
     # only 255 has protocol name reserverd ... hmmm..
     assert Ival('any/reserved') == Ival((Ival.PORTSTR, 255 * 2**16, 2**16))
     assert str(Ival('any/reserveD')) == 'any/reserved'
+
+
+def test_any_anyany():
+    'any is IP, any/any is PORTSTR'
+    assert Ival('any') != Ival('any/any')
+    assert Ival('any').is_any()
+    assert Ival('any/any').is_any()
 
 
 def test_ival_pfx_shorthand():
@@ -400,11 +409,10 @@ def test_ival_port_summary2():
     assert str(summ[0]) == '0-7/tcp'
 
 
-def test_ival_mixed_summary():
+def test_ival_summary():
     'mixed ivals can be summarized as well'
     ivals = ['1.1.1.0/24', '0-12/tcp', '1.1.0.0/24', '13-15/tcp']
     mixed = [Ival(i) for i in ivals]
-
     assert Ival.summary(mixed) == [Ival('1.1.0.0/23'), Ival('0-15/tcp')]
 
 
@@ -437,17 +445,77 @@ def test_bad_portprotos():
 
 
 def test_ival_splicing():
-    'PORTSTRings need to be spliced into pfx-ranges'
-    # Ival's port_as_pfx_summ needs to turn port-ranges into
-    # prefix-like intervals for use with PyTricia
+    'PORTSTRings need to be spliced into prefix-like ranges'
     ival = Ival('0-9/tcp')
-    assert Ival._splice(ival) == [Ival('0-7/tcp'), Ival('8-9/tcp')]
+    assert Ival.splice(ival) == [Ival('0-7/tcp'), Ival('8-9/tcp')]
 
     ival = Ival('0-15/tcp')
-    assert Ival._splice(ival) == [Ival('0-15/tcp')]
+    assert Ival.splice(ival) == [Ival('0-15/tcp')]
 
     ival = Ival('0-12/tcp')
-    assert Ival._splice(ival) == [Ival('0-7/tcp'), Ival('8-11/tcp'),
-                                   Ival('12/tcp')]
+    assert Ival.splice(ival) == [Ival('0-7/tcp'), Ival('8-11/tcp'),
+                                 Ival('12/tcp')]
 
+    assert Ival.splice(Ival('0-13/tcp')) == [Ival('0-7/tcp'),
+                                             Ival('8-11/tcp'),
+                                             Ival('12-13/tcp')]
+
+
+def test_ival_splice2():
+    'splicing a port-range, '
+    pass
+
+
+def test_ival_network():
+    'network is new ival for 1st value in ival'
+    # network() preserves mask/length
+    x = Ival('10.10.10.10/24')
+    y = x.network()
+    assert y is not x
+    assert y == Ival('10.10.10.0/24')
+
+    # for a portrange, you get the range back
+    x = Ival('123-125/tcp')
+    y = x.network()
+    assert y is not x
+    assert y == Ival('123-125/tcp')
+
+    assert Ival('1.1.1.1/31').network() == Ival('1.1.1.0/31')
+    assert Ival('1.1.1.1/32').network() == Ival('1.1.1.1/32')
+
+    x = Ival('0.0.0.0/0')
+    y = x.network()
+    assert y is not x
+    assert y == Ival('0.0.0.0/0')
+
+
+def test_ival_broadcast1():
+    'broadcast yields new ival for last value in ival'
+    # also preserves mask
+    x = Ival('12-15/tcp')
+    y = x.broadcast()
+    assert y is not x
+    assert y == Ival('12-15/tcp')
+
+
+def test_ival_broadcast2():
+    x = Ival('255.255.255.0/24')
+    y = x.broadcast()
+    print(x, y)
+    assert y is not x
+    z = Ival('255.255.255.255/24')
+    print(x, y, z)
+    print(x.values())
+    print(y.values())
+    print(z.values())
+    print(x.imask())
+    assert y == Ival('255.255.255.255/24')
+
+
+def test_ival_broadcast3():
+    x = Ival('0.0.0.0/0')
+    y = x.broadcast()
+    assert y is not x
+    assert y == Ival('255.255.255.255/0')
+    assert y.address() == Ival('255.255.255.255/32')
 

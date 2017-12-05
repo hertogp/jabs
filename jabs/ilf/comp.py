@@ -85,7 +85,6 @@ def ast_includes(ast):
 def _ivalify(lst):
     'return same list with IP, PORTSTR - values turned into Ivals'
     rv, errs = [], []  # in case of errors
-    errs = []
     for elm in lst:
         try:
             if elm[0] == 'IP':
@@ -287,6 +286,7 @@ def chk_ast_norefs(ast):
     return ast
 
 
+# XXX : chk_ast_args
 def chk_stmt_args(ast):
     'check validity of arguments supplied to statements in ast'
     # XXX implement these checks:
@@ -318,7 +318,6 @@ def chk_stmt_args(ast):
             ast[idx] = (pos, ('ERROR', stmt[0], msg))
 
     return ast
-    pass
 
 
 # -- Compile
