@@ -734,7 +734,6 @@ class Ip4Filter(object):
             raise OSError(fmt.format(fname, e))
         return True
 
-
     def from_csv(self, fname):
         'read ruleset from csv-file'
         # TODO: check for empty df and presence of required fields
@@ -749,7 +748,7 @@ class Ip4Filter(object):
         if len(df.index) == 0:
             raise IOError('Ip4Filter cannot read {!r}'.format(fname))
 
-        # checking columns and get superfluous cols into list for later dta dict
+        # check columns and get superfluous cols into list for later dta dict
         required_columns = 'rule src dst dport action'.split()
         missing = [x for x in required_columns if x not in df.columns.values]
         dta_cols = [x for x in df.columns.values if x not in required_columns]
