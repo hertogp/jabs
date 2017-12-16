@@ -50,30 +50,30 @@ def p_statement(p):
 
 def p_statement_newline(p):
     '''statement : NEWLINE'''
-    p[0] = _stmt(p, ('BLANK',))
+    p[0] = _stmt(p, ['BLANK'])
 
 
 def p_include(p):
     '''include-stmt : INCLUDE PARENSTR NEWLINE'''
-    p[0] = _stmt(p, ('INCLUDE', p[2]))
+    p[0] = _stmt(p, ['INCLUDE', p[2]])
 
 
 def p_include_error(p):
     '''include-stmt : INCLUDE error NEWLINE'''
-    p[0] = _stmt(p, ('ERROR', 'INCLUDE', 'parse error'))
+    p[0] = _stmt(p, ['ERROR', 'INCLUDE', 'parse error'])
 
 
 def p_definition(p):
     '''definition-stmt : STR group NEWLINE'''
     if p[1][1].lower() == 'any':
-        p[0] = _stmt(p, ('ERROR', 'GROUP', 'redefines ANY'))
+        p[0] = _stmt(p, ['ERROR', 'GROUP', 'reserved name ANY'])
     else:
-        p[0] = _stmt(p, ('GROUP', p[1][1], p[2]))
+        p[0] = _stmt(p, ['GROUP', p[1][1], p[2]])
 
 
 def p_definition_error(p):
     '''definition-stmt : STR error NEWLINE'''
-    p[0] = _stmt(p, ('ERROR', 'GROUP', '{!r} parse error'.format(p[1][1])))
+    p[0] = _stmt(p, ['ERROR', 'GROUP', '{!r} parse error'.format(p[1][1])])
 
 
 def p_group(p):
@@ -96,44 +96,44 @@ def p_item(p):
 def p_rule(p):
     #  0           1     2   3     4   5     6     7     8   9      10
     'rule-stmt : TILDE tag group DIR group AT group COLON action json NEWLINE'
-    # rule = (type tag addrs dir addrs srvs action tag json)
-    p[0] = _stmt(p, ('RULE', p[2], p[3], p[4], p[5], p[7], p[9], p[10]))
+    # rule = [type tag addrs dir addrs srvs action tag json]
+    p[0] = _stmt(p, ['RULE', p[2], p[3], p[4], p[5], p[7], p[9], p[10]])
 
 
 def p_rule_json_error(p):
     'rule-stmt : TILDE tag group DIR group AT group COLON action error NEWLINE'
-    p[0] = _stmt(p, ('ERROR', 'RULE', 'JSON parse error'))
+    p[0] = _stmt(p, ['ERROR', 'RULE', 'JSON parse error'])
 
 
 def p_rule_action_error(p):
     '''rule-stmt : TILDE tag group DIR group AT group COLON error NEWLINE'''
-    p[0] = _stmt(p, ('ERROR', 'RULE', 'ACTION parse error'))
+    p[0] = _stmt(p, ['ERROR', 'RULE', 'ACTION parse error'])
 
 
 def p_rule_service_error(p):
     '''rule-stmt : TILDE tag group DIR group AT error NEWLINE'''
-    p[0] = _stmt(p, ('ERROR', 'RULE', 'SERVICE parse error'))
+    p[0] = _stmt(p, ['ERROR', 'RULE', 'SERVICE parse error'])
 
 
 def p_rule_dest_error(p):
     '''rule-stmt : TILDE tag group DIR error NEWLINE'''
-    p[0] = _stmt(p, ('ERROR', 'RULE', 'DESTINATION parse error'))
+    p[0] = _stmt(p, ['ERROR', 'RULE', 'DESTINATION parse error'])
 
 
 def p_rule_src_error(p):
     '''rule-stmt : TILDE tag error NEWLINE'''
-    p[0] = _stmt(p, ('ERROR', 'RULE', 'SOURCE parse error'))
+    p[0] = _stmt(p, ['ERROR', 'RULE', 'SOURCE parse error'])
 
 
 def p_rule_tag_error(p):
     '''rule-stmt : TILDE error NEWLINE'''
-    p[0] = _stmt(p, ('ERROR', 'RULE', 'TAG parse error'))
+    p[0] = _stmt(p, ['ERROR', 'RULE', 'TAG parse error'])
 
 
 def p_ruleadd(p):
     '''rule-stmt : PLUS DIR group NEWLINE
                  | PLUS AT group NEWLINE'''
-    p[0] = _stmt(p, ('RULEPLUS', p[2], p[3]))
+    p[0] = _stmt(p, ['RULEPLUS', p[2], p[3]])
 
 
 def p_ruleadd_error(p):
@@ -143,10 +143,10 @@ def p_ruleadd_error(p):
                '>': 'DESTINATION',
                '<': 'SOURCE',
                '<>': 'SRC/DST'
-              }
+               }
 
-    p[0] = _stmt(p, ('ERROR', 'RULEPLUS',
-                     '{} error'.format(err_elm.get(p[2], ''))))
+    p[0] = _stmt(p, ['ERROR', 'RULEPLUS',
+                     '{} error'.format(err_elm.get(p[2], ''))])
 
 
 def p_tag(p):
@@ -160,7 +160,7 @@ def p_action(p):
               | DENY
               | DROP
               | DISCARD'''
-    p[0] = ('ACTION', p[1])
+    p[0] = p[1]
 
 
 def p_json(p):

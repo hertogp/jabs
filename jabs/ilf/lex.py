@@ -81,8 +81,16 @@ def t_STR(t):
     t.type = value if value in keywords else 'STR'
     if t.type in keywords:
         t.type = value
+    # temp
+    elif t.type == 'STR' and value == 'ANY':
+        t.type = 'IP'
+        t.value = (t.type, t.value.lower())
+    elif t.type == 'STR' and value == 'ANY/ANY':
+        t.type = 'PORTSTR'
+        t.value = (t.type, t.value.lower())
+    # temp
     else:
-        t.value = (t.type, t.value.lower()) # case insensitive names
+        t.value = (t.type, t.value.lower())  # case insensitive names
 
     return t
 
