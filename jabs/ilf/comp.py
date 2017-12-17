@@ -201,8 +201,8 @@ def ast_build_symbols(ast):
 
 
 def member_refs(dct):
-    'return (warnings, mbr-list) from recursive groupname dict'
-    # dct is {name} -> set([('STR', name), ..]), which may refer to other names
+    'return a flat, expanded member list from, possible, recursive definition'
+    # dct is {name} -> set([name, ..]), which may refer to other names
     for target, mbrs in dct.items():
         heap = list(mbrs)  # mbrs name ('STR', name)
         seen, dct[target] = [target], set([])
@@ -225,25 +225,20 @@ def ast_symbol_table(ast):
               'any/any': set([Ival.port_str('any/any')])}
     TODO = {}  # GROUP-name -> [group-names to include]
 
-    import pprint
-    # 1st pass, assemble IP/PORTSTR into groupname table
+    # 1st pass, assemble IP/PORTSTR into groupname table and
+    #  defer group references till later
     for idx, pos, stmt in ast_enum(ast, ['GROUP']):
         _, grpname, mbrs = stmt
-        refs = [t for t in mbrs if t[0] == 'STR']
-        noref = [t for t in mbrs if t not in refs]
+        refs = [t[1] for t in mbrs if t[0] == 'STR']  # only the name
+        noref = [t for t in mbrs if t[0] != 'STR']    # entire token
+        ivals = []
         try:
             ivals = _ivalify(noref, Ival.IP, Ival.PORTSTR)
         except ValueError as e:
             ast[idx] = (pos, ('ERROR', 'GROUP', repr(e)))
-        for ival in ivals:
-            GROUPS.setdefault(grpname, set()).add(ival)
-        for ref in refs:
-            TODO.setdefault(grpname, set()).add(ref[1])
-
-    print('-'*80, '1st pass results')
-    pprint.pprint(GROUPS, indent=3)
-    print('.'*80, '1st pass todo')
-    pprint.pprint(TODO, indent=3)
+            continue
+        GROUPS.setdefault(grpname, set()).update(ivals)
+        TODO.setdefault(grpname, set()).update(refs)
 
     # 2nd pass, expand references
     for name, mbrs in member_refs(TODO).items():
@@ -251,16 +246,7 @@ def ast_symbol_table(ast):
             xtra = GROUPS.get(mbr, [])
             if len(xtra) == 0:
                 print('empty ref', mbr, 'for group', name)
-            print('adding', xtra, 'to', name)
             GROUPS[name] = GROUPS.setdefault(name, set()).union(xtra)
-
-    print('-'*80, '2nd pass')
-    pprint.pprint(GROUPS, indent=3)
-    # 2nd pass, add group refs to groupnames
-    print('-'*80)
-    TODO = member_refs(TODO)
-    pprint.pprint(TODO, indent=3)
-    raise SystemExit(0)
 
     return GROUPS
 
@@ -410,6 +396,7 @@ def compile_file(filename):
     grps = ast_symbol_table(ast)
     import pprint
     pprint.pprint(grps, indent=3)
+    print_ast(ast)
     raise SystemExit(0)
     ast = ast_build_symbols(ast)   # build the GROUPS symbol table
     ast = ast_semantics(ast)       # check validity of ast
