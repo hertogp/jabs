@@ -785,6 +785,41 @@ class Commander(object):
 
         return self
 
+    def cmd_sort(self, lhs, rhs):
+        '''
+        syntax: sort:fx[,..],r
+        info: sort on column fx[,..]
+        descr:
+           'sort:' will sort the dataframe on 1 or more columns
+
+           All rhs-fields must exist. No lhs-fields allowed.
+
+           Example:
+            sort:name
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) != 0:
+            errors.append('no lhs-fields allowed')
+        if len(rhs) > 1 and rhs[-1] == 'r':
+            reverse = True
+            rhs = rhs[0:-1]
+        elif len(rhs) < 1:
+            errors.append('need 1+ rhs-field')
+        else:
+            reverse = False
+
+        self.check_fields(errors, rhs)
+        self.fatal(errors, lhs, rhs)
+
+        try:
+            self.dfm = self.dfm.sort_values(by=rhs, ascending=reverse)
+            log.info('- df = df.sort_values(by={}, ascending={})'.format(
+                rhs, reverse))
+        except KeyError as e:
+            self.fatal(['Unknown runtime error {!r}'.format(e)], lhs, rhs)
+
+        return self
 
     def cmd_lower(self, lhs, rhs):
         '''
@@ -815,10 +850,10 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
 
         try:
-            for dst,src in zip(lhs, srcs):
+            for dst, src in zip(lhs, srcs):
                 log.info('- df[{}] = df[{}].str.lower()'.format(dst, src))
                 self.dfm[dst] = self.dfm[src].str.lower()
-        except KeyError:
+        except KeyError as e:
             self.fatal(['Unknown runtime error {!r}'.format(e)], lhs, rhs)
 
         return self
@@ -894,6 +929,39 @@ class Commander(object):
         try:
             self.dfm = self.dfm[srcs]
             self.dfm.columns = lhs
+
+        except Exception as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        return self
+
+    def cmd_recent(self, lhs, rhs):
+        '''
+        syntax: fx[,..]=seen:fz
+        info: sort by fz, groupby fy[,..] most recent records
+        descr:
+
+          Example:
+              seen=recent:usrName,usrGSM
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) < 1:
+            errors.append('need 1+ lhs fields to keep')
+        srcs = lhs
+        if len(rhs) != 1:
+            errors.append('need exactly 1 datetime field as rhs-field')
+        fld_datetime = rhs[0]
+        self.check_fields(errors, srcs)
+        self.fatal(errors, lhs, rhs)
+
+        print('recent lhs', srcs)
+        try:
+            self.dfm[fld_datetime] = pd.to_datetime(self.dfm[fld_datetime])
+            self.dfm.set_index(fld_datetime, inplace=True)
+            self.dfm.sort_index(ascending=False, inplace=True)  # most recent first
+            self.dfm.reset_index(inplace=True)  # otherwise groupby().apply() complains
+            self.dfm = self.dfm.groupby(srcs, as_index=False).first()  # keep most recent
 
         except Exception as e:
             self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
@@ -1428,6 +1496,70 @@ class Commander(object):
 
         return self
 
+    def cmd_list(self, lhs, rhs):
+        '''
+        syntax: fx=concat:fy[..]
+        info: summarize on all columns except fy and concat those into fx
+
+        descr:
+          If rhs-fields are listed, all other fields/columns are discarded and
+          rows are grouped on the remaining columns listed in the rhs.
+          Otherwise rows are grouped using all available columns.  Note that any
+          listed rhs-field must exist in the dataframe.
+
+          if a lhs-field is given, its values are concatenated for each group and
+          assigned to this column.  Otherwise, a new column is created and the
+          assigned value will be a count of similar rows in the groups.
+
+          Example:
+
+           |  host  error  count  - sample dataframe
+           |  A     down   12
+           |  B     crash  3
+           |  A     crash  4
+           |  B     down   6
+           |  A     crash  3
+           |  B     down   8
+
+           events=concat:host     - seen is count of host occurrences
+
+           |  host events
+           |  A    down 12, crash 4, crash 3
+           |  B    crash 3, down 6, down 8
+
+
+           events=concat:host,error   - total amount of host,error combinations
+
+           |  host error events
+           |  A    crash 4, 3
+           |  A    down  12
+           |  B    crash 3
+           |  B    down  6, 8
+        '''
+        # sanity check lhs, rhs
+        errors = []
+        if len(lhs) != 1 or len(lhs[0]) < 1:
+            errors.append('need exactly 1 lhs field')
+        self.check_fields(errors, rhs)
+        self.fatal(errors, lhs, rhs)
+
+        dst = lhs[0]
+        log.debug('list: dst is', dst)
+        grp = [c for c in self.dfm.columns.values if c not in rhs]
+
+        if dst not in self.dfm.columns:
+            self.dfm[dst] = 1
+        print(lhs, '=list:{}'.format(grp), rhs)
+
+        def join_(arg):
+            return '|'.join(arg.values)
+
+        try:
+            self.dfm = self.dfm.groupby(grp, as_index=False).agg(join_)
+        except (KeyError, ValueError) as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        return self
 
     def cmd_sum(self, lhs, rhs):
         '''

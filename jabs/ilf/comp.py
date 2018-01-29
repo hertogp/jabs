@@ -33,7 +33,7 @@ def ast_enum(ast, types=None):
             yield (idx, pos, stmt)
 
 
-def ast_error(pos, err_type, stmt_type, msg):
+def ast_errmsg(pos, err_type, stmt_type, msg):
     'small helper to easily create ERROR/WARNING stmts'
     return (pos, [err_type, stmt_type, msg])
 
@@ -42,7 +42,7 @@ def ast_includes(ast):
     'expand include-statements in-place'
     seen = {}
     idx = -1
-    while idx+1 < len(ast):
+    while idx+1 < len(ast):  # while loop since ast is expanding
         idx += 1
         (fname, linenr, col), stmt = ast[idx]
         if stmt[0] != 'INCLUDE':
@@ -51,19 +51,21 @@ def ast_includes(ast):
         absname = os.path.realpath(os.path.normpath(
             os.path.join(os.path.dirname(fname), stmt[1])))
         if absname in seen:
-            ast[idx] = ((fname, linenr, 1),
-                        ('ERROR', 'INCLUDE', '{}: already includes {}'.format(
-                            seen[absname], absname)))
+            ast[idx] = ast_errmsg(
+                (fname, linenr, 1),
+                'ERROR', stmt[0],
+                '{} already included at {}'.format(absname, seen[absname]))
             continue
 
         seen[absname] = '{}:{}:{}'.format(fname, linenr, col)  # record include
         try:
             with open(absname, 'r') as fhdl:
-                include_ast = parse(fhdl)
+                include_ast = parse(fhdl)  # possibly includes new includes(..)
         except (IOError, OSError):
-            ast[idx] = ((fname, linenr, 1),
-                        ('ERROR', 'INCLUDE', 'cannot find/read {}'.format(
-                            absname)))
+            ast[idx] = ast_errmsg(
+                (fname, linenr, 1),
+                'ERROR', stmt[0],
+                'cannot find/read {}'.format(absname))
             continue
 
         ast[idx:idx+1] = include_ast  # replace include(file) with its stmts
@@ -98,24 +100,24 @@ def ast_ivalify(ast):
     for idx, pos, stmt in ast_enum(ast, ['GROUP', 'RULE', 'RULEPLUS']):
         try:
             if stmt[0] == 'GROUP':
-                ast[idx] = (pos, [stmt[0], stmt[1], _ivalify(stmt[2],
-                                                             Ival.IP,
-                                                             Ival.PORTSTR)])
+                ivals = Ival.summary(_ivalify(stmt[2], Ival.IP, Ival.PORTSTR))
+                ast[idx] = (pos, (stmt[0], stmt[1], ivals))
             elif stmt[0] == 'RULEPLUS':
                 scope = Ival.PORTSTR if stmt[1] == '@' else Ival.IP
-                ast[idx] = (pos, [stmt[0], stmt[1], _ivalify(stmt[2], scope)])
+                ivals = Ival.summary(_ivalify(stmt[2]), scope)
+                ast[idx] = (pos, (stmt[0], stmt[1], ivals))
 
             elif stmt[0] == 'RULE':
-                srcs = _ivalify(stmt[2], Ival.IP)
-                dsts = _ivalify(stmt[4], Ival.IP)
-                srvs = _ivalify(stmt[5], Ival.PORTSTR)
-                ast[idx] = (pos, [stmt[0], stmt[1], srcs, stmt[3],
-                                  dsts, srvs, *stmt[6:]])
+                srcs = Ival.summary(_ivalify(stmt[2], Ival.IP))
+                dsts = Ival.summary(_ivalify(stmt[4], Ival.IP))
+                srvs = Ival.summary(_ivalify(stmt[5], Ival.PORTSTR))
+                ast[idx] = (pos, (stmt[0], stmt[1], srcs, stmt[3],
+                                  dsts, srvs, *stmt[6:]))
             else:
                 raise ValueError('{} invalid stmt for ast_ivalify'.format(
                     stmt[0]))
         except ValueError as e:
-            ast[idx] = ast_error(pos, 'ERROR', stmt[0], '{}'.format((e)))
+            ast[idx] = ast_errmsg(pos, 'ERROR', stmt[0], '{}'.format((e)))
 
     return ast
 
@@ -126,89 +128,23 @@ def ast_jsonify(ast):
         if stmt[-1] is None:
             continue
         try:
-            stmt[-1] = json.loads(stmt[-1])
+            # json string (if any) is the last element in a rule
+            ast[idx] = (pos, (*stmt[0:-1], json.loads(stmt[-1])))
         except (TypeError, json.decoder.JSONDecodeError) as e:
-            ast[idx] = ast_error(pos, 'ERROR', stmt[0],
-                                 'json-error: {}'.format((e)))
+            ast[idx] = ast_errmsg(pos, 'ERROR', stmt[0],
+                                  'json-error: {}'.format((e)))
     return ast
 
 
-def ast_groups(ast):
-    'return set of unique group definitions in ast'
-    names = [stmt[1] for pos, stmt in ast_iter(ast, ['GROUP'])]
-    return set(names)
-
-
-def ast_members(ast, group, _seen=None):
-    'return a list of unique members of a group'
-    _seen = set([]) if _seen is None else _seen
-    _seen.add(group)
-    coll = set([])
-    target_group = group.lower()
-    for pos, stmt in ast_iter(ast, ['GROUP']):
-        _, name, items = stmt
-        if name.lower() != target_group:
-            continue
-
-        for item in items:
-            if item[0] in ['IP', 'PORTSTR']:
-                coll.add(item)
-            elif item[0] == 'STR':
-                gname = item[1]
-                if gname in _seen:
-                    fmt = 'circular ref for {!r} via {!r}'
-                    ast.append((pos, ['WARNING', 'GROUP', fmt.format(gname,
-                                                                     group)]))
-                    continue
-
-                # in group statements 'any' == 0/0, 'any/any' == ALL-ports
-                gname = gname.lower()
-                if gname.lower() == 'any':
-                    coll.add(('IP', '0.0.0.0/0'))
-                elif gname.lower() == 'any/any':
-                    coll.add(('PORTSTR', 'any'))
-                else:
-                    # empty groups are caught by chk_ast_norefs
-                    for addition in ast_members(ast, gname, _seen):
-                        coll.add(addition)
-            else:
-                raise ValueError('illegal item {} in group {}'.format(item,
-                                                                      group))
-
-    return list(coll)
-
-
-def ast_build_symbols(ast):
-    'initialize and fill group-symbol table'
-    global GROUPS
-    GROUPS = {'any': set([Ival.ip_pfx('any')]),
-              'any/any': set([Ival.port_str('any/any')])}
-
-    for grp in ast_groups(ast):
-        try:
-            for typ, value in ast_members(ast, grp):
-                if typ == 'IP':
-                    GROUPS.setdefault(grp, set()).add(Ival.ip_pfx(value))
-                elif typ == 'PORTSTR':
-                    GROUPS.setdefault(grp, set()).add(Ival.port_str(value))
-                else:
-                    raise ValueError('Illegal item {} in group {}'.format(typ,
-                                                                          grp))
-        except ValueError as e:
-            print(type, value)
-            print('Err', e, repr(e))
-    return ast
-
-
-def member_refs(dct):
-    'return a flat, expanded member list from, possible, recursive definition'
+def expand_refs(dct):
+    'return an expanded member list from a, possibly, recursive definition'
     # dct is {name} -> set([name, ..]), which may refer to other names
     for target, mbrs in dct.items():
         heap = list(mbrs)  # mbrs name ('STR', name)
         seen, dct[target] = [target], set([])
         while heap:
             nxt = heap.pop()
-            if nxt in seen:
+            if nxt in seen:  # circular reference
                 continue
             seen.append(nxt)
             if nxt in dct:
@@ -221,32 +157,32 @@ def member_refs(dct):
 def ast_symbol_table(ast):
     'Build the symbol table for the ast'
     # need 2 passes, since forward referencing is allowed
-    GROUPS = {'any': set([Ival.ip_pfx('any')]),
-              'any/any': set([Ival.port_str('any/any')])}
+    global GROUPS
     TODO = {}  # GROUP-name -> [group-names to include]
 
-    # 1st pass, assemble IP/PORTSTR into groupname table and
-    #  defer group references till later
+    # 1st pass, collect direct IP/PORTSTR's per groupname and
+    #  defer group references till phase2
     for idx, pos, stmt in ast_enum(ast, ['GROUP']):
         _, grpname, mbrs = stmt
         refs = [t[1] for t in mbrs if t[0] == 'STR']  # only the name
-        noref = [t for t in mbrs if t[0] != 'STR']    # entire token
-        ivals = []
-        try:
-            ivals = _ivalify(noref, Ival.IP, Ival.PORTSTR)
-        except ValueError as e:
-            ast[idx] = (pos, ('ERROR', 'GROUP', repr(e)))
-            continue
-        GROUPS.setdefault(grpname, set()).update(ivals)
-        TODO.setdefault(grpname, set()).update(refs)
+        TODO.setdefault(grpname, set()).update(refs)  # defer named ref's
+        grpdef = GROUPS.setdefault(grpname, set())    # always define symbol
 
-    # 2nd pass, expand references
-    for name, mbrs in member_refs(TODO).items():
+        try:
+            ivals = _ivalify([m for m in mbrs if m[0] != 'STR'],
+                             Ival.IP, Ival.PORTSTR)
+            grpdef.update(ivals)  # add straight IP/PORTSTR's to symbol def.
+        except ValueError as e:
+            ast[idx] = (pos, ('ERROR', 'GROUP', e.args[0]))
+            print('dir ValueError as e', e, dir(e), e.args)
+
+    # 2nd pass, expand delayed references
+    for name, mbrs in expand_refs(TODO).items():
         for mbr in mbrs:
             xtra = GROUPS.get(mbr, [])
             if len(xtra) == 0:
                 print('empty ref', mbr, 'for group', name)
-            GROUPS[name] = GROUPS.setdefault(name, set()).union(xtra)
+            GROUPS.setdefault(name, set()).update(xtra)
 
     return GROUPS
 
@@ -321,22 +257,37 @@ def chk_ast_dangling(ast):
     return ast
 
 
-def chk_ast_norefs(ast):
-    'checking group references'
+def chk_ast_refs(ast):
+    'check group references'
     global GROUPS
 
-    def no_refs(lst):
+    def undefined_refs(lst):
         return [x[1] for x in lst if x[0] == 'STR' and x[1] not in GROUPS]
 
-    for idx, pos, stmt in ast_enum(ast, ['GROUP', 'RULE', 'RULEPLUS']):
-        unrefs = no_refs(stmt[2])  # unknown group-refs, srcs, dsts or srvs
-        if stmt[0] == 'RULE':
-            unrefs += no_refs(stmt[4])  # add unknown dsts
-            unrefs += no_refs(stmt[5])  # add unknown srvs
+    def empty_refs(lst):
+        return [x[1] for x in lst if x[0] == 'STR' and x[1] in GROUPS and len(
+            GROUPS.get(x[1], [])) == 0]
 
-        if len(unrefs):
-            msg = 'undefined reference(s): {}'.format(', '.join(unrefs))
-            ast[idx] = (pos, ('ERROR', stmt[0], msg))
+    for idx, pos, stmt in ast_enum(ast, ['GROUP', 'RULE', 'RULEPLUS']):
+        unrefs = undefined_refs(stmt[2])  # unknown group-references
+        emptyrefs = empty_refs(stmt[2])   # undefined group-references
+        if stmt[0] == 'RULE':
+            unrefs += undefined_refs(stmt[4])  # add unknown dsts
+            emptyrefs += empty_refs(stmt[4])
+            unrefs += undefined_refs(stmt[5])  # add unknown srvs
+            emptyrefs += empty_refs(stmt[5])
+
+        if len(unrefs) and len(emptyrefs):
+            msg = 'has empty ref: {} and undefined refs: {}'.format(
+                ', '.join(emptyrefs), ', '.join(unrefs))
+        elif len(unrefs):
+            msg = 'has undefined references: {}'.format(unrefs)
+        elif len(emptyrefs):
+            msg = 'has empty references: {}'.format(emptyrefs)
+        else:
+            continue  # all is ok
+
+        ast[idx] = (pos, ('ERROR', stmt[0], msg))
 
     return ast
 
@@ -389,16 +340,13 @@ def print_ast(ast):
 
 def compile_file(filename):
     'compile file into IP4Filter object'
+    global GROUPS  # re-initialze global symbol table
+    GROUPS = {'any': set([Ival.ip_pfx('any')]),
+              'any/any': set([Ival.port_str('any/any')])}
     with open(filename, 'rt') as fhdl:
         ast = parse(fhdl)          # parse master file
     ast = ast_includes(ast)        # include & parse include(files)
-    print_ast(ast)
-    grps = ast_symbol_table(ast)
-    import pprint
-    pprint.pprint(grps, indent=3)
-    print_ast(ast)
-    raise SystemExit(0)
-    ast = ast_build_symbols(ast)   # build the GROUPS symbol table
+    GROUPS = ast_symbol_table(ast)
     ast = ast_semantics(ast)       # check validity of ast
     ast = ast_ivalify(ast)         # turn IP, PORTSTR strings into Ival's
     ast = ast_jsonify(ast)         # turn json str into python object
