@@ -209,34 +209,34 @@ class Commander(object):
     def load_ipl(self, name):
         'load an ip lookup table <name>[.csv] from disk or return a cached one'
         # return a cached version, if available
-        if self.ipl.has_key(name):
+        if name in self.ipl:
             return self.ipl[name]
 
         # no joy on cache, so load from disk
         errors = []
         fname = name if os.path.isfile(name) else '{}.csv'.format(name)
         try:
-            ipl = load_csv(fname)
-        except (OSError, IOError) as e:
+            ipl = self.load_csv(fname)
+        except (OSError, IOError):
             errors.append('tried {!r}, but no joy'.format(name))
-            errors.append('tried {!r} as well, still no joy'.format(filename))
+            errors.append('tried {!r} as well, still no joy'.format(fname))
             self.fatal(errors, None, None)
 
         # find suitable field
         tmp = pt.PyTricia()
-        for field in df.columns:
+        for field in ipl.columns:
             try:
-                tmp[df[field].iloc[0]] = 'test'
+                tmp[ipl[field].iloc[0]] = 'test'
                 ip_field = field
                 break
             except ValueError:
                 continue
 
         # tidy the ip_field lookup column (also remove leading zeros?)
-        df[ip_field] = df[ip_field].str.replace(' ', '')
+        ipl[ip_field] = ipl[ip_field].str.replace(' ', '')
 
         ipt = pt.PyTricia()
-        for idx, row in df.iterrows():
+        for idx, row in ipl.iterrows():
             try:
                 ip_idx = row[ip_field]
                 # ensure /32 for bare addresses
@@ -245,17 +245,10 @@ class Commander(object):
                     # has_key must be used to do an exact match, because
                     # the "if ip_idx in ipt:" does a longest pfx match,
                     # which is not what we want here...
-                    # prn(0, '>> ignoring duplicate entry for {}'.format(ip_idx))
-                    # prn(0, ' - already have', ','.join(str(x) for x in ipt[ip_idx]))
-                    # prn(0, ' - ignoring data', ','.join(str(x) for x in row))
                     continue
                 ipt[ip_idx] = row  # stores reference to the Series
             except ValueError:
-                # prn(0, 'Fatal, cannot create ip lookup table from dataframe')
-                # prn(0, 'its index is not an ip address?')
-                # prn(0, df.index)
-                # prn(0, 'current index element: {}'.format(idx))
-                # prn(0, 'current row is', row)
+                log.debug('cannot create ip lookup table from %s', name)
                 sys.exit(1)
 
         return ipl
@@ -1177,6 +1170,50 @@ class Commander(object):
 
         return self
 
+    def cmd_add(self, lhs, rhs):
+        '''
+        syntax: fx=add:fy,fz,..
+        info: add fields after mapping them to numbers
+        descr:
+           Create new column fx (or overwrite existing one) by add the
+           values of columns fy,fz,.. after converting them to int(s)
+           A field value that fails to convert, defaults to nan.
+
+           Only 1 lhs-field is allowed and a minimum of 2 rhs-fields are
+           required.  All rhs-fiels must be existing fields in the dataframe.
+        '''
+
+        # sanity check lhs, rhs
+        errors = []
+        if len(rhs) < 2:
+            errors.append('need 2+ fields in rhs: sep,f1,f2,...')
+        if len(lhs) != 1:
+            errors.append('need exactly 1 lhs field')
+        dst = lhs[0]
+        srcs = rhs
+        self.check_fields(errors, srcs)
+        self.fatal(errors, lhs, rhs)
+
+        # helper to safely convert & sum fields
+        def intsum(fields):
+            val = 0
+            log.debug('adding %s', fields)
+            for field in fields:
+                try:
+                    val += int(float(field))
+                    log.debug('val is %s', val)
+                except ValueError:
+                    pass
+            return val
+
+        try:
+            self.dfm[dst] = self.dfm[srcs].apply(
+                lambda x: intsum(f for f in x), axis=1)
+        except Exception as e:
+            self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+
+        return self
+
     def cmd_map(self, lhs, rhs):
         '''
         syntax: fx,..=map:fy
@@ -1544,12 +1581,11 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
 
         dst = lhs[0]
-        log.debug('list: dst is', dst)
+        log.debug('list: dst is %s', dst)
         grp = [c for c in self.dfm.columns.values if c not in rhs]
 
         if dst not in self.dfm.columns:
             self.dfm[dst] = 1
-        print(lhs, '=list:{}'.format(grp), rhs)
 
         def join_(arg):
             return '|'.join(arg.values)
