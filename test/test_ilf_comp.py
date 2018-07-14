@@ -30,28 +30,3 @@ def test_good_input():
 
 
 
-def test_adjacent_ranges():
-    'test if two ranges can be comined'
-    from jabs import ilf
-    x = ilf.core.Ival.ip_pfx('1.1.0.0/24')
-    y = ilf.core.Ival.ip_pfx('1.1.1.0/24')
-    z = ilf.core.Ival.summary([x, y])
-
-    # time itjkjk
-    import timeit
-    A = """\
-x = Ival(Ival.IP, 0, 2*256).network().start
-"""
-    B = """2**lowest_bit(0) >= 2*256"""
-    C = """(0 & (2**32-256)) == (0 & (2**32-512))"""
-
-    print()
-    print('timeit')
-    print('A', timeit.timeit(stmt=A, globals=globals()))
-    print()
-    print('B', timeit.timeit(stmt=B, globals=globals()))
-    print('C', timeit.timeit(stmt=C, globals=globals()))
-
-    n = ilf.core.lowest_bit(x.start)
-    assert (2**n >= 2*x.length) == True
-
