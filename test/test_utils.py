@@ -1,8 +1,8 @@
 import pytest
 import sys
-sys.path.insert(0, '..')
-sys.path.insert(0, '.')
+
 print('test_utils', sys.path)
+
 import jabs.utils as ut
 
 

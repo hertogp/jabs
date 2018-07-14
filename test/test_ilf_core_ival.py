@@ -7,9 +7,45 @@ sys.path.insert(0, '..')
 sys.path.insert(0, '.')
 import pytest
 from jabs.ilf.core import Ival
+from jabs.ilf.core import lowest_bit, is_power2
+
+
+def test_is_power2():
+    'check if number is power of 2'
+    assert is_power2(0) == False
+    assert is_power2(1) == True
+    assert is_power2(2) == True
+    assert is_power2(3) == False
+    assert is_power2(4) == True
+    assert is_power2(5) == False
+
+    assert is_power2(2**32) == True
+
+    for x in range(0,33):
+        assert is_power2(2**x) == True
+
+    for x in range(1,33):
+        # avoid 2**0 + 1 is 2 is power of 2
+        assert is_power2(1 + 2**x) == False
+
+def test_lowest_bit():
+    x = Ival.ip_pfx('1.1.0.0/24')
+    y = Ival.ip_pfx('0.0.0.0/24')
+
+    n = lowest_bit(x.start)
+    assert n == 16
+
+    n = lowest_bit(y.start)
+    assert n == 0
+
+    a = lowest_bit(Ival.ip_pfx('0.0.0.0').start)
+    b = lowest_bit(Ival.ip_pfx('0.0.0.1').start)
+    assert a == 0
+    assert b == 0
 
 
 # -- Test Ival - set operations
+
 
 def test_ival_in_set1():
     'equal Ivals turn up as 1 entry in a set'
@@ -347,12 +383,12 @@ def test_ival_sorting():
 def test_ival_pfx_summary1():
     'test summarization of prefixes'
     #            pfx-list,                     single-summary-prefix
-    valids = [(['1.1.1.0/24', '1.1.2.0/24'], '1.1.1.0/23'),
+    valids = [(['1.1.0.0/24', '1.1.1.0/24'], '1.1.0.0/23'),
               (['1.1.1.0/25', '1.1.1.128/25'], '1.1.1.0/24'),
               (['1.1.2.128/25', '1.1.2.0/25'], '1.1.2.0/24'),
 
-              (['1.1.1.0/25', '1.1.2.128/25',
-                '1.1.1.128/25', '1.1.2.0/25'], '1.1.1.0/23'),
+              (['1.1.0.0/25', '1.1.1.128/25',
+                '1.1.0.128/25', '1.1.1.0/25'], '1.1.0.0/23'),
 
               # all hosts 1.0.0.0 - 1.0.0.255 => 1.0.0.0/24
               (['1.0.0.{}'.format(x) for x in range(0, 256)],
@@ -408,6 +444,20 @@ def test_ival_pfx_summary6():
     ivals = []
     assert Ival.pfx_summary(ivals) == []
 
+def test_ival_pfx_symmary7():
+    'cannot combine prefixes if mask changes lowest network address'
+    ivals = list(map(Ival.ip_pfx, '9/8 10/8'.split()))
+    assert Ival.summary(ivals) == ivals
+
+def test_ival_pfx_symmary8():
+    'cannot combine non-adjacent prefixes'
+    ivals = list(map(Ival.ip_pfx, '9/24 10/24'.split()))
+    assert Ival.summary(ivals) == ivals
+
+def test_ival_pfx_symmary9():
+    'cannot combine non-adjacent prefixes'
+    ivals = list(map(Ival.ip_pfx, '8/24 9/24'.split()))
+    assert Ival.summary(ivals) == ivals
 
 def test_ival_port_summary():
     'port summary of adjacent intervals'

@@ -177,7 +177,7 @@ parser = yacc.yacc()
 
 
 def parse(fhdl):
-    'parse a filter defintion file'
+    'parse a filter definition file'
     name = fhdl.name if hasattr(fhdl, 'name') else '__string__'
     realfname = os.path.realpath(os.path.normpath(name))
     try:

@@ -1,12 +1,16 @@
 '''
 test dfm script
+
+Run tests by doing:
+
+  $ cd ~/dev/jabs
+  $ pytest
+
 '''
 
 import logging
 import sys
-sys.path.insert(0, './jabs')   # in case of running tests form main dir
-sys.path.insert(0, '../jabs')  # in case we run test inside test dir
-import dfm
+import jabs.dfm as dfm
 
 
 def test_verbose_warn():

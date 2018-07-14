@@ -71,8 +71,8 @@ import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from ilf import Ip4Filter, Ip4Protocol, Ip4Service, Ival
-import utils as ut
+from jabs.ilf import Ip4Filter, Ip4Protocol, Ip4Service, Ival
+import jabs.utils as ut
 
 #-- Logging
 
@@ -1502,7 +1502,7 @@ class Commander(object):
     def cmd_gte(self, lhs, rhs):
         '''
         syntax: fx,..=gte:v1
-        info: rows where any lhs-field <= v1
+        info: rows where any lhs-field >= v1
         descr:
           'gte:' will keep rows where any lhs-field has a value greater then, or
           equal to v1. All lhs-fields must be numeric and must exist.
@@ -1672,13 +1672,17 @@ class Commander(object):
             rhs = [c for c in self.dfm.columns.values if c != dst]
 
         if dst not in self.dfm.columns:
+            log.debug('setting column %s to 1', dst)
             self.dfm[dst] = 1
         elif self.dfm[dst].dtype not in ['int64', 'float64']:
-            errors.append('{!r} is not numeric'.format(dst))
-            errors.append('available columns and types are:')
-            for name, typ in self.dfm.dtypes.items():
-                errors.append('{}:{}'.format(name, typ))
-            self.fatal(errors, lhs, rhs)
+            log.debug('casting %s (type %s) to %r',
+                      dst, self.dfm[dst].dtype, 'int64')
+            self.dfm[dst] = self.dfm[dst].astype('int64')
+            # errors.append('{!r} is not numeric'.format(dst))
+            # errors.append('available columns and types are:')
+            # for name, typ in self.dfm.dtypes.items():
+            #     errors.append('{}:{}'.format(name, typ))
+            # self.fatal(errors, lhs, rhs)
 
         try:
             self.dfm = self.dfm.groupby(rhs, as_index=False).agg({dst: 'sum'})

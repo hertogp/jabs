@@ -5,3 +5,5 @@ python-dateutil>=2.6.1
 pytricia>=0.9.6
 pytz>=2017.2
 six>=1.10.0
+ply>=3.11
+pytest>=3.6.2

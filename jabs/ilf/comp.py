@@ -5,8 +5,9 @@ ilf - compiler
 import os
 import json
 
-from .parse import parse
-from .core import Ival, Ip4Filter
+from jabs.ilf.parse import parse
+from jabs.ilf.core import Ip4Filter, Ival
+
 
 # -- GLOBALS
 # (re)initialized by compile_file
@@ -123,16 +124,23 @@ def ast_ivalify(ast):
 
 
 def ast_jsonify(ast):
-    'turn a rule\'s json string into python object or None'
+    'turn a rule\'s json string into a python dict'
+    # only RULE tuple's have json string (or None) as last element
     for idx, pos, stmt in ast_enum(ast, ['RULE']):
-        if stmt[-1] is None:
-            continue
         try:
-            # json string (if any) is the last element in a rule
-            ast[idx] = (pos, (*stmt[0:-1], json.loads(stmt[-1])))
+            dct = {} if stmt[-1] is None else json.loads(stmt[-1])
+            ast[idx] = (pos, (*stmt[0:-1], dct))
         except (TypeError, json.decoder.JSONDecodeError) as e:
             ast[idx] = ast_errmsg(pos, 'ERROR', stmt[0],
                                   'json-error: {}'.format((e)))
+        # if stmt[-1] is None:
+        #     ast[idx] = (pos, (*stmt[0:-1], {})
+        # try:
+        #     # json string (if any) is the last element in a rule
+        #     ast[idx] = (pos, (*stmt[0:-1], json.loads(stmt[-1])))
+        # except (TypeError, json.decoder.JSONDecodeError) as e:
+        #     ast[idx] = ast_errmsg(pos, 'ERROR', stmt[0],
+        #                           'json-error: {}'.format((e)))
     return ast
 
 
@@ -158,6 +166,9 @@ def ast_symbol_table(ast):
     'Build the symbol table for the ast'
     # need 2 passes, since forward referencing is allowed
     global GROUPS
+    # (re-)initialise symbol table
+    GROUPS = {'any': set([Ival.ip_pfx('any')]),
+              'any/any': set([Ival.port_str('any/any')])}
     TODO = {}  # GROUP-name -> [group-names to include]
 
     # 1st pass, collect direct IP/PORTSTR's per groupname and
@@ -338,28 +349,50 @@ def print_ast(ast):
               *(elm for elm in stmt))
 
 
-def compile_file(filename):
+def compile(src):
     'compile file into IP4Filter object'
-    global GROUPS  # re-initialze global symbol table
-    GROUPS = {'any': set([Ival.ip_pfx('any')]),
-              'any/any': set([Ival.port_str('any/any')])}
-    with open(filename, 'rt') as fhdl:
-        ast = parse(fhdl)          # parse master file
+    global GROUPS
+
+    try:
+        fhdl = open(src, "rt")     # src is a readable filename
+    except (IOError, OSError):
+        import io                  # otherwise, treat it as text
+        fhdl = io.StringIO(src)
+
+    ast = parse(fhdl)
     ast = ast_includes(ast)        # include & parse include(files)
-    GROUPS = ast_symbol_table(ast)
+    GROUPS = ast_symbol_table(ast) # create new symbol table
     ast = ast_semantics(ast)       # check validity of ast
     ast = ast_ivalify(ast)         # turn IP, PORTSTR strings into Ival's
     ast = ast_jsonify(ast)         # turn json str into python object
 
     errors = list(ast_iter(ast, 'ERROR'))
     warnings = list(ast_iter(ast, 'WARNING'))
-    print('Score: E{}, W{}'.format(len(errors), len(warnings)))
     for pos, msg in errors:
-        print('{}{}'.format(pos, msg))
+        print('Error:{}:{}'.format(pos, msg))
     for pos, msg in warnings:
-        print('{}{}'.format(pos, msg))
+        print('Warning:{}:{}'.format(pos, msg))
+    print('Score: E{}, W{}'.format(len(errors), len(warnings)))
     if len(errors):
         print_ast(ast)
         raise SystemExit(1)
 
-    return ast_rules(ast)  # will become ilfilter
+
+    # TODO:
+    # - check consistency of Ival methods throughout the code
+    # - perhaps rename Ival alt constructors to from_pfx, from_portstr, from_ival etc
+    rules = ast_rules(ast)
+    print('\n')
+    print('-'*35, 'RULES')
+    for rule in rules:
+        print(rule)
+    print('\n')
+    ip4f = Ip4Filter()
+    print('-'*35, 'ADDing rules')
+    for rid, (tag, srcs, dsts, ports, action, dta) in enumerate(rules):
+        dta['tag'] = tag if tag else rid
+        print(rid, tag, '|', srcs, '|', dsts, '|', ports, '>', action, dta)
+        ip4f.add(rid, srcs, dsts, ports, action, dta)
+    return ip4f
+
+

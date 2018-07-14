@@ -7,6 +7,7 @@ sys.path.insert(0, '..')
 sys.path.insert(0, '.')
 import jabs.ilf.lex as lex
 
+
 # -- IP tokens
 
 
@@ -94,6 +95,7 @@ def test_portstr2():
 
 # -- PARENSTR
 
+
 def test_parenstr1():
     'PARENSTR matches anything inside parens'
     text = '(match:ALL:"inside"@parens!/"see?)'
@@ -107,6 +109,7 @@ def test_parenstr1():
 
 # -- BRACKSTR
 
+
 def test_brackstr1():
     'BRACKSTR matches brackets and anything inside'
     text = '{key:value, key: value}'
@@ -116,6 +119,7 @@ def test_brackstr1():
     assert len(toks) == 1
     assert toks[0].type == 'BRACKSTR'
     assert toks[0].value == text
+
 
 # -- STRing
 
@@ -155,7 +159,7 @@ def test_str3():
         assert toks == [('STR', 'word'), sep, ('STR', 'word')]
 
 
-# -- DIR
+# -- DIRECTION
 
 
 def test_dir():

@@ -114,7 +114,6 @@ def test_rule_good():
         fhdl = io.StringIO(line)
         p = jp.parse(fhdl)
         assert p is not None
-        print(p)
         assert len(p) == 1
         _, stmt = p[0]
         assert len(stmt) == 8
@@ -133,7 +132,6 @@ def test_rule_good_compact():
         fhdl = io.StringIO(line)
         p = jp.parse(fhdl)
         assert p is not None
-        print(p)
         assert len(p) == 1
         _, stmt = p[0]
         assert len(stmt) == 8
@@ -177,7 +175,6 @@ def test_ruleplus_service():
     assert stmt[0] == 'RULEPLUS'
     assert stmt[1] == '@'
     assert stmt[2] == [('PORTSTR', '80/tcp'), ('STR', 'portset2')]
-    print(p)
 
 
 # -- ILF SCRIPT
@@ -199,8 +196,8 @@ def test_multi_line1():
     script = '\n'.join(lines) + '\n'
     fhdl = io.StringIO(script)
     p = jp.parse(fhdl)
-    for pos, stmt in p:
-        print(stmt)
+    # for pos, stmt in p:
+    #     print(stmt)
     assert p is not None
     assert len(p) == 8
     stypes = [stmt[0] for _, stmt in p]

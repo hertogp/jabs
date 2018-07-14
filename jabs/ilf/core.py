@@ -9,11 +9,7 @@ from itertools import chain
 
 import pytricia as pt
 
-from .numbers import IP4PROTOCOLS, IP4SERVICES
-
-
-# -- Globals
-
+from jabs.ilf.numbers import IP4PROTOCOLS, IP4SERVICES
 
 # -- Helpers
 
@@ -30,6 +26,11 @@ def lowest_bit(num):
 
 def binarr(n):
     return [n >> i & 1 for i in range(n.bit_length() - 1, -1, -1)]
+
+
+def is_power2(n):
+    'check if n is power of 2, note: 2**0 is 1 is valid'
+    return (n>0 and (n & (n-1) == 0))
 
 
 class Ip4Protocol(object):
@@ -105,22 +106,16 @@ class Ival(object):
     TYPES = (INVALID, IP, PORTSTR)
 
     def __init__(self, type_, start, length):
-            self.type = type_
-            self.start = start
-            self.length = length
+        'create Ival from specified type & start, length'
+        self.type = type_
+        self.start = start
+        self.length = length
 
-    # alternate constructor
-    @classmethod
-    def port_proto(cls, port, proto):
-        port = int(port)
-        proto = int(proto)
-        if proto < 0 or proto > 255 or port < 0 or port > 2**16 - 1:
-            raise ValueError()
-        return cls(cls.PORTSTR, port + proto * 2**16, 1)
+    # -- alternate constructors
 
-    # alternate constructor
     @classmethod
     def ip_pfx(cls, value):
+        'Create Ival IP from a.b.c.d/e'
         if value == 'any':
             return cls(cls.IP, 0, 2**32)
 
@@ -141,9 +136,18 @@ class Ival(object):
         return cls(cls.IP, x[0]*2**24 + x[1]*2**16 + x[2]*2**8 + x[3],
                    2**(32-plen))
 
-    # alternate constructor
+    @classmethod
+    def port_pfx(cls, value):
+        'create Ival PORTSTR from port expressed as prefix a.b.c.d/e'
+        return Ival.ip_pfx(value).switch(cls.PORTSTR)
+        # pfx = Ival.ip_pfx(value)
+        # pfx.type = Ival.PORTSTR
+        # return pfx
+
     @classmethod
     def port_str(cls, value):
+        'Create Ival from <port>/<proto>'
+        value = value.lower()
         if value == 'any/any' or value == 'any':
             return cls(cls.PORTSTR, 0, 2**32)
 
@@ -178,6 +182,17 @@ class Ival(object):
             if stop < 0 or stop > 2**16 - 1:
                 raise ValueError()
             return cls(cls.PORTSTR, proto_num * 2**16 + start, length)
+
+    @classmethod
+    def port_proto(cls, port, proto):
+        'Create Ival from <port>, <proto>'
+        port = int(port)
+        proto = int(proto)
+        if proto < 0 or proto > 255 or port < 0 or port > 2**16 - 1:
+            raise ValueError()
+        return cls(cls.PORTSTR, port + proto * 2**16, 1)
+
+    # -- comparisons
 
     def __repr__(self):
         return '({!r}, {!r})'.format(self.TYPE[self.type], str(self))
@@ -264,6 +279,8 @@ class Ival(object):
             return Ival(self.type, self.start + self.idx, 1)
         raise StopIteration
 
+    # -- methods
+
     def values(self, values=None):
         'get the values of the ival object'
         return (self.type, self.start, self.length)
@@ -329,6 +346,19 @@ class Ival(object):
     def is_any(self):
         return self.length == 2**32  # any-interval has max length
 
+    def port(self):
+        'return new Ival with type set as PORTSTR'
+        return Ival(Ival.PORTSTR, self.start, self.length)
+
+    def switch(self, ival_type):
+        'switch Ival.type to ival_type'
+        if ival_type not in self.TYPES:
+            raise ValueError('Unknown Ival type {!r}'.format(ival_type))
+        self.type = ival_type
+        return self
+
+    # -- summarization
+
     def splice(self, ival_type=None):
         'return a list of new prefix-like intervals, override type if given'
         if ival_type and ival_type not in self.TYPES:
@@ -351,30 +381,50 @@ class Ival(object):
     @classmethod
     def combine(cls, x, y):
         'if possible, return a combined ival, None otherwise'
-        # PORTSTR intervals can be combined if adjacent or overlapping
-        # ditto for IP intervals, plus adjacent ivals must have same length
-        if y is None:
-            return cls(*x.values())
-        if x is None:
-            return cls(*y.values())
-        if x.type != y.type:
+        # border cases
+        if x is None and y is None:
             return None
+        elif y is None:
+            return cls(*x.values())
+        elif x is None:
+            return cls(*y.values())
+        elif x.type != y.type:
+            return None
+
+        # x,y two valid Ivals of same type
+
+        # - intervals are the same
         if x == y:
             return cls(*x.values())
-        # x starts to the left of y
-        x, y = (x, y) if x < y else (y, x)
+
+        # - interval inside the other interval
         if x in y:
             return cls(*y.values())
         if y in x:
             return cls(*x.values())
-        if x.type == cls.IP and x.length != y.length:
-            return None
-        if x.start + x.length == y.start:
-            if x.type == cls.PORTSTR or x.start % 2 == 0:
+
+        # ensure x starts to the left of y
+        x, y = (x, y) if x.start <= y.start else (y, x)
+
+        # type dependent situations
+        if x.type == cls.PORTSTR:
+            # combine adjacent intervals
+            if x.start + x.length == y.start:
                 return cls(x.type, x.start, x.length + y.length)
-        if x.type == cls.PORTSTR and x.start + x.length > y.start:
-            ivlen = max(x.start + x.length, y.start + y.length) - x.start
-            return cls(x.type, x.start, ivlen)
+            # combine partially overlapping intervals
+            if x.start + x.length > y.start:
+                ivlen = max(x.start + x.length, y.start + y.length) - x.start
+                return cls(x.type, x.start, ivlen)
+
+        if x.type == cls.IP:
+            # pfxs can only be combined if:
+            # - intervals are adjacent
+            # - lengths are equal
+            # - lowest start address does not change with doubling of mask
+            if x.length == y.length and x.start + x.length == y.start:
+                # x.start MUST be the network() address of the ival!
+                if x.start == x.start & (2**32 - 2*x.length):
+                    return cls(x.type, x.start, 2*x.length)
 
         return None  # no joy
 
@@ -412,27 +462,20 @@ class Ival(object):
 
     @classmethod
     def pfx_summary(cls, ivals):
-        'summarize the IP-prefixes in ivals, returns only IP-pfxs'
-        subset = [i.network() for i in ivals if i.type == cls.IP]
-        return cls.summary(subset)
+        'summarize the IP-s in ivals, returns only IP-pfxs'
+        return cls.summary(i for i in ivals if i.type == cls.IP)
 
     @classmethod
     def port_summary(cls, ivals):
-        'summarize the PORTSTR-ings in ivals, returns only PORTSRs'
-        subset = [i for i in ivals if i.type == cls.PORTSTR]
-        return cls.summary(subset)
+        'summarize the PORTSTR-s in ivals, returns only PORTSTRs'
+        return cls.summary(i for i in ivals if i.type == cls.PORTSTR)
 
     @classmethod
     def portpfx_summary(cls, ivals):
-        'summarize PORTSTR-ivals and return them as ip prefixes'
-        ports = []
-        for p in ivals:
-            if p.type == cls.PORTSTR:
-                ports.extend(p.splice(ival_type=cls.IP))
-        summ = cls.summary(ports)
-        # for p in summ:
-        #     p.type = cls.PORTSTR  # switch back to portstr type
-        return summ
+        'summarize PORTSTR-s and return them as ip prefixes'
+        PORTSTR, IP = cls.PORTSTR, cls.IP
+        portpfxs = [y for x in ivals if x.type==PORTSTR for y in x.splice(IP)]
+        return cls.summary(portpfxs)
 
 
 class Ip4Filter(object):
@@ -491,15 +534,21 @@ class Ip4Filter(object):
 
     def add(self, rid, srcs, dsts, ports, action='', dta={}):
         'add a new rule or just add src and/or dst to an existing rule'
-        summary = Ival.pfx_summary
-        for ival in summary(Ival(x).network() for x in srcs):
+        # for ival in summary(Ival(x).network() for x in srcs):
+        #     self._set_rid(rid, self._src, ival)
+        for ival in Ival.pfx_summary(srcs):
             self._set_rid(rid, self._src, ival)
 
-        for ival in summary(Ival(x).network() for x in dsts):
+        # for ival in summary(Ival(x).network() for x in dsts):
+        #     self._set_rid(rid, self._dst, ival)
+        for ival in Ival.pfx_summary(dsts):
             self._set_rid(rid, self._dst, ival)
 
-        ports_as_pfxs = chain(*(Ival(x).as_networks() for x in ports))
-        for ival in ports_as_pfxs:
+        # ports_as_pfxs = chain(*(Ival(x).as_networks() for x in ports))
+        # for ival in ports_as_pfxs:
+        #     self._set_rid(rid, self._dpp, ival)
+        # ports_as_pfxs = chain(*(Ival(x).as_networks() for x in ports))
+        for ival in Ival.portpfx_summary(ports):
             self._set_rid(rid, self._dpp, ival)
 
         fmt = 'warn: {}, {} swaps {!r} for new {!r}'
@@ -529,17 +578,18 @@ class Ip4Filter(object):
 
     def get_rids(self, src, dst, port=None, proto=None):
         'return the set of rule ids matched by session-tuple'
-
+        # src, dst are prefixes 'a.b.c.d[/e]'
+        # port = '<nr>/<protoname>' OR port='nr', proto='nr'
         try:
             if port is None:
                 dpp = None
             elif proto is None:
-                dpp = Ival.from_portstr(port).to_pfx()
+                dpp = Ival.port_str(port).switch(Ival.IP)
             else:
-                dpp = Ival.from_portproto(int(port), int(proto)).to_pfx()
+                dpp = Ival.port_proto(int(port), int(proto)).switch(Ival.IP)
             rids = self._dst[dst]
             if dpp is not None:
-                rids = rids.intersection(self._dpp[dpp])
+                rids = rids.intersection(self._dpp[str(dpp)])
             return rids.intersection(self._src[src])
         except (KeyError, ValueError):
             return set()
@@ -549,10 +599,11 @@ class Ip4Filter(object):
 
     def match(self, src, dst, port=None, proto=None):
         'return True (permit), False (no permit) or the nomatch value'
+        src = src if src else 'any'
         rids = self.get_rids(src, dst, port, proto)
         if len(rids) == 0:
             return self._nomatch
-        # TODO: make it an error is a rule-id is missing from _act
+        # TODO: make it an error if a rule-id is missing from _act
         return self._act.get(min(rids), self._nomatch)
 
     def get(self, src, dst, port=None, proto=None):
@@ -566,14 +617,9 @@ class Ip4Filter(object):
 
     def rules(self):
         'reconstruct the rules in a dict of dicts'
-        # {rule_id} -> {src:[srcs],
-        #               dst:[dsts],
-        #               dport: [ports],
-        #               action: action,
-        #               dta: {dta-dict}
-        #              }
+        # {rule_id: {src:[..], dst:[..], dport: [..], action: str, dta: {..}}}
+
         rules = {}
-        # note: a PyTricia dict has no items() method
         for pfx in self._src.keys():
             ruleset = self._src[pfx]
             for rulenr in ruleset:
@@ -590,9 +636,8 @@ class Ip4Filter(object):
                     raise Exception(errfmt.format(rulenr))
                 dct.setdefault('dst', []).append(pfx)
 
-        for dpp in self._dpp.keys():
-            ruleset = self._dpp[dpp]
-            port = Ival.from_pfx(dpp).to_portstr()
+        for port in self._dpp.keys():
+            ruleset = self._dpp[port]
             for rulenr in ruleset:
                 dct = rules.setdefault(rulenr, {})
                 if len(dct) == 0:
@@ -613,56 +658,37 @@ class Ip4Filter(object):
 
         # sanitize more specifics in a src/dst list of a rule
         for r, rule in rules.items():
-            summ = Ival.pfx_summary(map(Ival.from_pfx, rule['src']))
-            rule['src'] = [x.to_pfx() for x in summ]
-
-            summ = Ival.pfx_summary(map(Ival.from_pfx, rule['dst']))
-            rule['dst'] = [x.to_pfx() for x in summ]
-
-            # TODO: minimize port ranges
-            summ = Ival.port_summary(map(Ival.from_portstr, rule['dport']))
-            rule['dport'] = [x.to_portstr() for x in summ]
+            rule['src'] = Ival.summary(map(Ival.ip_pfx, rule['src']))
+            rule['dst'] = Ival.summary(map(Ival.ip_pfx, rule['dst']))
+            rule['dport'] = Ival.summary(map(Ival.port_pfx, rule['dport']))
 
         return rules
 
     def lines(self, csv=False):
         'return filter as lines for printing'
-        # {rule_id} -> {src:[srcs],
-        #               dst:[dsts],
-        #               dport: [ports],
-        #               action: action,
-        #               dta: {dta-dict}
+        # {rule_id: {src:[..], dst:[..], dport: [..], action: str, dta: {..}}}
         #              }
         rules = sorted(self.rules().items())  # rules dict -> ordered [(k,v)]
-        rdct=rules[-1][-1]  # a sample dta dict
-
-        required_fields = 'rule src dst dport action'.split()
-        dta_fields = sorted(rdct.get('dta', {}).keys())  # sorted dta keys
-        dta_fields = [x for x in rdct['dta'].keys() if x not in required_fields]
-
-        fmt = '{},{},{},{},{}' if csv else '{:<5} {:21} {:21} {:16} {:7}'
-        dta_header = ',{}' if csv else ' {:15}'
-        fmt += dta_header * len(dta_fields)
-
-        all_fields = required_fields + dta_fields
-        lines = [fmt.format(*all_fields)]   # csv-header of field names
+        fields = 'rule src dst dport action dta'.split()
+        fmt = '{!s:<5} {!s:21} {!s:21} {!s:16} {!s:7} {!s}'
+        fmt = '{},{},{},{},{},{}' if csv else fmt
+        lines = [fmt.format(*fields)]   # csv-header of field names
         for nr, rule in rules:
             maxl = max(len(rule['src']), len(rule['dst']), len(rule['dport']))
+            lines.append('-'*85)
             for lnr in range(0, maxl):
+                act = ''
                 src = rule['src'][lnr] if lnr < len(rule['src']) else ''
                 dst = rule['dst'][lnr] if lnr < len(rule['dst']) else ''
                 prt = rule['dport'][lnr] if lnr < len(rule['dport']) else ''
+                dta = ''
                 if lnr == 0:
                     act = 'permit' if rule['action'] else 'deny'
-                else:
-                    act = ''
-                if lnr == 0:
-                    data = [rule['dta'][k] for k in dta_fields]
-                else:
-                    data = [''] * len(dta_fields)
+                    dta = rule['dta']
 
-                lines.append(fmt.format(nr, src, dst, prt, act, *data))
+                lines.append(fmt.format(nr, src, dst, prt, act, dta))
                 nr = ''  # only list rule nr on first line
+
         return lines
 
     def to_csv(self, fname):
@@ -707,12 +733,23 @@ class Ip4Filter(object):
             df['rule'] = df['rule'].astype(int)
             for idx, row in df.iterrows():
                 rid = int(row['rule'])  # TODO: we did atype(int) already?
-                srcs = [x.strip() for x in row['src'].split()]
-                dsts = [x.strip() for x in row['dst'].split()]
-                ports = [x.strip() for x in row['dport'].split()]
+
+                # srcs = [x.strip() for x in row['src'].split()]
+                # dsts = [x.strip() for x in row['dst'].split()]
+                # ports = [x.strip() for x in row['dport'].split()]
+                # act = row['action']
+                # dta = row[dta_cols].to_dict()
+                # self.add(rid, srcs, dsts, ports, act, dta)
+
+                srcs = [Ival.ip_pfx(x.strip()) for x in row['src'].split()]
+                dsts = [Ival.ip_pfx(x.strip()) for x in row['dst'].split()]
+                ports = [Ival.port_str(x.strip()) for x in row['dport'].split()]
                 act = row['action']
                 dta = row[dta_cols].to_dict()
                 self.add(rid, srcs, dsts, ports, act, dta)
         except Exception as e:
             print('oops', repr(e))
             sys.exit(1)
+
+
+
