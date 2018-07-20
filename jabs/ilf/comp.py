@@ -128,19 +128,12 @@ def ast_jsonify(ast):
     # only RULE tuple's have json string (or None) as last element
     for idx, pos, stmt in ast_enum(ast, ['RULE']):
         try:
-            dct = {} if stmt[-1] is None else json.loads(stmt[-1])
-            ast[idx] = (pos, (*stmt[0:-1], dct))
+            dta = None if stmt[-1] is None else json.loads(stmt[-1])
+            ast[idx] = (pos, (*stmt[0:-1], dta))
         except (TypeError, json.decoder.JSONDecodeError) as e:
+            print('could not decode ', stmt[-1])
             ast[idx] = ast_errmsg(pos, 'ERROR', stmt[0],
                                   'json-error: {}'.format((e)))
-        # if stmt[-1] is None:
-        #     ast[idx] = (pos, (*stmt[0:-1], {})
-        # try:
-        #     # json string (if any) is the last element in a rule
-        #     ast[idx] = (pos, (*stmt[0:-1], json.loads(stmt[-1])))
-        # except (TypeError, json.decoder.JSONDecodeError) as e:
-        #     ast[idx] = ast_errmsg(pos, 'ERROR', stmt[0],
-        #                           'json-error: {}'.format((e)))
     return ast
 
 
@@ -350,13 +343,13 @@ def print_ast(ast):
 
 
 def compile(src):
-    'compile file into IP4Filter object'
+    'compile file or script text into IP4Filter object'
     global GROUPS
 
     try:
-        fhdl = open(src, "rt")     # src is a readable filename
+        fhdl = open(src, "rt")     # either a filename
     except (IOError, OSError):
-        import io                  # otherwise, treat it as text
+        import io                  # or text
         fhdl = io.StringIO(src)
 
     ast = parse(fhdl)
@@ -375,24 +368,15 @@ def compile(src):
     print('Score: E{}, W{}'.format(len(errors), len(warnings)))
     if len(errors):
         print_ast(ast)
-        raise SystemExit(1)
+        raise SystemExit('Filter script contains errors')
 
 
     # TODO:
-    # - check consistency of Ival methods throughout the code
-    # - perhaps rename Ival alt constructors to from_pfx, from_portstr, from_ival etc
+    # - maybe return (errors, warnings, ip4f)
     rules = ast_rules(ast)
-    print('\n')
-    print('-'*35, 'RULES')
-    for rule in rules:
-        print(rule)
-    print('\n')
     ip4f = Ip4Filter()
-    print('-'*35, 'ADDing rules')
-    for rid, (tag, srcs, dsts, ports, action, dta) in enumerate(rules):
-        dta['tag'] = tag if tag else rid
-        print(rid, tag, '|', srcs, '|', dsts, '|', ports, '>', action, dta)
-        ip4f.add(rid, srcs, dsts, ports, action, dta)
+    for rid, (name, srcs, dsts, ports, action, obj) in enumerate(rules):
+        ip4f._add(rid, srcs, dsts, ports, name, action, obj)
     return ip4f
 
 

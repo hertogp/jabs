@@ -107,7 +107,7 @@ def test_rule_good():
     # ('RULE', tag, src-list, DIR, dst-list, port-list, action, json)
     lines = [
         '~ src > dst @ port : drop\n',
-        '~ (my-tag) src <> dst @ ports : permit {"name": "duh"}\n',
+        '~ (my-tag) src <> dst @ ports : permit = {"name": "duh"}\n',
         '~ () src, src2 > dst,dst2 @ ports,ports2 : drop\n',
         ]
     for line in lines:
@@ -125,8 +125,8 @@ def test_rule_good_compact():
     # ('RULE', tag, src-list, DIR, dst-list, port-list, action, json)
     lines = [
         '~src>dst@port:drop\n',
-        '~(my-tag)src<>dst@ports:permit{"name":"duh"}\n',
-        '~()src,src2>dst,dst2@ports,ports2:drop{}\n',
+        '~(my-tag)src<>dst@ports:permit={"name":"duh"}\n',
+        '~()src,src2>dst,dst2@ports,ports2:drop\n',
         ]
     for line in lines:
         fhdl = io.StringIO(line)
@@ -136,6 +136,31 @@ def test_rule_good_compact():
         _, stmt = p[0]
         assert len(stmt) == 8
         assert stmt[0] == 'RULE'
+
+
+def test_rule_json1():
+    'RULE stmt can have json string after ='
+    # ('RULE', tag, src-list, DIR, dst-list, port-list, action, json)
+    lines = [
+        '~(no-json)src>dst@port:permit\n',
+        '~(empty-json)src>dst@port:permit=\n',
+        '~(with-json1)src>dst@port:permit=awesome json str\n',
+        '~(with-json2)src>dst@port:permit=["awesome", "json", "arr"]\n',
+        '~(with-json3)src>dst@port:permit={"awesome": ["json", "object"]}\n',
+        '~(with-json4)src>dst@port:permit=123\n',
+    ]
+    for line in lines:
+        fhdl = io.StringIO(line)
+        p = jp.parse(fhdl)
+        assert p is not None
+        assert len(p) == 1
+        _, stmt = p[0]
+        assert len(stmt) == 8
+        assert stmt[0] == 'RULE'
+
+
+
+
 
 
 # -- RULEPLUS
@@ -196,8 +221,6 @@ def test_multi_line1():
     script = '\n'.join(lines) + '\n'
     fhdl = io.StringIO(script)
     p = jp.parse(fhdl)
-    # for pos, stmt in p:
-    #     print(stmt)
     assert p is not None
     assert len(p) == 8
     stypes = [stmt[0] for _, stmt in p]

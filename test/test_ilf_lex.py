@@ -107,19 +107,37 @@ def test_parenstr1():
     assert toks[0].value == text[1:-1]
 
 
-# -- BRACKSTR
+# -- JSON
 
-
-def test_brackstr1():
-    'BRACKSTR matches brackets and anything inside'
-    text = '{key:value, key: value}'
+def test_json1():
+    'JSON matches all after a equal sign'
+    text = '= this is not json'
     lexr = lex.lexer
     lexr.input(text)
     toks = [t for t in lexr]
     assert len(toks) == 1
-    assert toks[0].type == 'BRACKSTR'
-    assert toks[0].value == text
+    assert toks[0].type == 'JSON'
+    assert toks[0].value == text[1:].strip()
 
+def test_json2():
+    'match json object'
+    text = '= {"string": "str", "number": 29, "object": {"1": "1", "2":2, "3":[1,2,3]}, "array": [1,2,3]}'
+    lexr = lex.lexer
+    lexr.input(text)
+    toks = [t for t in lexr]
+    assert len(toks) == 1
+    assert toks[0].type == 'JSON'
+    assert toks[0].value == text[1:].strip()
+
+def test_json3():
+    'JSON matches all after a equal sign, including any comments'
+    text = '= this is not # json'
+    lexr = lex.lexer
+    lexr.input(text)
+    toks = [t for t in lexr]
+    assert len(toks) == 1
+    assert toks[0].type == 'JSON'
+    assert toks[0].value == 'this is not # json'
 
 # -- STRing
 

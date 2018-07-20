@@ -5,6 +5,9 @@ ilf core utilities
 import sys
 import re
 import math
+import json
+import io
+import pandas as pd
 from itertools import chain
 
 import pytricia as pt
@@ -31,6 +34,11 @@ def binarr(n):
 def is_power2(n):
     'check if n is power of 2, note: 2**0 is 1 is valid'
     return (n>0 and (n & (n-1) == 0))
+
+
+def pp2portstr(port, proto):
+    'convert port, protocol numbers to port string'
+    return str(Ival.port_proto(int(port), int(proto)))
 
 
 class Ip4Protocol(object):
@@ -120,18 +128,19 @@ class Ival(object):
             return cls(cls.IP, 0, 2**32)
 
         x = value.split('/', 1)
+        err = 'Invalid ip prefix {!r}'
         plen = 32 if len(x) == 1 else int(x[1])
         if plen < 0 or plen > 32:
-            raise ValueError()
+            raise ValueError(err.format(value))
 
         x = list(map(int, x[0].split('.')))
         if len(x) < 1 or len(x) > 4:
-            raise ValueError()
+            raise ValueError(err.format(value))
         elif len(x) < 4:
             x = (x + [0, 0, 0, 0])[0:4]
         for digit in x:
             if digit < 0 or digit > 255:
-                raise ValueError()
+                raise ValueError(err.format(value))
 
         return cls(cls.IP, x[0]*2**24 + x[1]*2**16 + x[2]*2**8 + x[3],
                    2**(32-plen))
@@ -140,20 +149,18 @@ class Ival(object):
     def port_pfx(cls, value):
         'create Ival PORTSTR from port expressed as prefix a.b.c.d/e'
         return Ival.ip_pfx(value).switch(cls.PORTSTR)
-        # pfx = Ival.ip_pfx(value)
-        # pfx.type = Ival.PORTSTR
-        # return pfx
 
     @classmethod
     def port_str(cls, value):
         'Create Ival from <port>/<proto>'
-        value = value.lower()
+        value = value.lower().strip()
+        err = 'Invalid port string {!r}'
         if value == 'any/any' or value == 'any':
             return cls(cls.PORTSTR, 0, 2**32)
 
         x = value.split('/')      # port(range)/proto-name
         if len(x) != 2:
-            raise ValueError()
+            raise ValueError(err.format(value))
         x[0:1] = x[0].split('-')  # only split port(range) on '-'
         x = [y.strip() for y in x]
 
@@ -167,7 +174,7 @@ class Ival(object):
                 length = 1
                 base = int(x[0])
                 if base < 0 or base > 2**16 - 1:
-                    raise ValueError()
+                    raise ValueError(err.format(value))
             return cls(cls.PORTSTR, proto_num * 2**16 + base, length)
 
         elif len(x) == 3:
@@ -178,9 +185,9 @@ class Ival(object):
                 start, stop = stop, start
             length = stop - start + 1
             if start < 0 or start > 2**16 - 1:
-                raise ValueError()
+                raise ValueError(err.format(value))
             if stop < 0 or stop > 2**16 - 1:
-                raise ValueError()
+                raise ValueError(err.format(value))
             return cls(cls.PORTSTR, proto_num * 2**16 + start, length)
 
     @classmethod
@@ -188,8 +195,9 @@ class Ival(object):
         'Create Ival from <port>, <proto>'
         port = int(port)
         proto = int(proto)
+        err = 'Invalid port protocol numbers {!r}, {!r}'
         if proto < 0 or proto > 255 or port < 0 or port > 2**16 - 1:
-            raise ValueError()
+            raise ValueError(err.format(port, proto))
         return cls(cls.PORTSTR, port + proto * 2**16, 1)
 
     # -- comparisons
@@ -286,13 +294,13 @@ class Ival(object):
         return (self.type, self.start, self.length)
 
     def is_valid(self):
-        'raise ValueError if invalid, return True otherwise'
+        'return True if valid, False otherwise'
         if self.type not in self.TYPES:
-            raise ValueError('Invalid Ival type {!r}'.format(self.type))
+            return False
         if self.start < 0 or self.start > 2**32 - 1:
-            raise ValueError('Invalid Ival start {!r}'.format(self.start))
+            return False
         if self.length < 0 or self.length > 2**32 - 1:
-            raise ValueError('Invalid Ival length {!r}'.format(self.length))
+            return False
         return True
 
     def prefix(self):
@@ -478,34 +486,68 @@ class Ival(object):
         return cls.summary(portpfxs)
 
 
+class Ip4FilterError(Exception):
+    pass
+
+class Ip4Match(object):
+    __slots__ = 'rule action name object'.split()
+
+    def __init__(self, rule, action, name, obj):
+        self.rule = rule
+        self.action = action
+        self.name = name
+        self.object = obj
+
 class Ip4Filter(object):
     '''
-    A class for ip session lookup's via src, dst [,portstring]
-    - match() -> True, False or no_match value (None by default)
-    - get()   -> Ip4Match object {
-                    'match': True or False or no_match value,
-                    'data' : dta dict or empty dict (if any)
-                    'ruleid': lowest matching rulenr or -1,
-                    'ruleids': all matching rulenrs
+    A class for ip session lookup's via src, dst  & portstring
+    - action() -> yields associated action or nomatch value
+    - match() -> yields match dict or nomatch value
+    - get()   -> match dict {
+                    'rule': Matched rule number
+                    'name' : the name of rule (or '')
+                    'action': the rule's action
+                    'object': the rule's python object (or None)
                     }
     '''
-    def __init__(self, filename=None):
+    def __init__(self, nomatch=None):
         self._src = pt.PyTricia()  # pfx -> set(rids) - Ival(src ip pfx)
         self._dst = pt.PyTricia()  # pfx -> set(rids) - Ival(dst ip pfx)
-        self._dpp = pt.PyTricia()  # pfx'-> set(rids) - Ival(dport/protocol)
-        self._act = {}             # rid -> action (True of False)
-        self._dta = {}             # rid -> dict data fields (if any)
-        self._pp = Ip4Protocol()   # an Ip4Protocol object
-        self._nomatch = None       # is returned when filter has no match
-        self.filename = filename
-        if filename:
-            self.from_csv(filename)
+        self._srv = pt.PyTricia()  # pfx'-> set(rids) - Ival(dport/protocol)
+        self._act = {}             # rid -> action (lower cased)
+        self._obj = {}             # rid -> any python object
+        self._tag = {}             # rid -> name tag of rule if any, else ''
+        self._nomatch = nomatch    # return value when there is no match at all
 
     def __len__(self):
+        'the number of rules in the filter'
         return len(self._act)
 
+    def _lines(self, csv=False):
+        'return filter as lines for printing'
+        # {rule_id: {src:[..], dst:[..], srv: [..], name: str, action: str, obj: obj}}
+        rules = sorted(self.as_dict.items())  # rules dict -> ordered [(k,v)]
+        fields = 'rule name src dst srv action obj'.split()
+        fmt = '{!s:<5} {!s:<15} {!s:21} {!s:21} {!s:16} {!s:7} {!s}'
+        fmt = '{},{},{},{},{},{},{}' if csv else fmt
+        lines = [fmt.format(*fields)]   # csv-header of field names
+        for rid, rule in rules:
+            maxl = max(len(rule['src']), len(rule['dst']), len(rule['srv']))
+            for lnr in range(0, maxl):
+                rid = rid if lnr == 0 else ''
+                tag = rule['name'] if lnr == 0 else ''
+                src = rule['src'][lnr] if lnr < len(rule['src']) else ''
+                dst = rule['dst'][lnr] if lnr < len(rule['dst']) else ''
+                prt = rule['srv'][lnr] if lnr < len(rule['srv']) else ''
+                act = rule['action'] if lnr == 0 else ''
+                obj = json.dumps(rule['obj']) if lnr == 0 else ''
+                obj = '' if obj in ['null', '""'] else obj
+                lines.append(fmt.format(rid, tag, src, dst, prt, act, obj))
+
+        return lines
+
     def _set_rid(self, rid, tbl, ival):
-        'set rule-id on single prefix in specific table'
+        'set/add to rule-id on single prefix in specific table'
         pfx = str(ival)
         try:
             if tbl.has_key(pfx):        # find the exact prefix
@@ -523,206 +565,156 @@ class Ip4Filter(object):
                 tbl[pfx] = tbl[pfx].union(tbl[parent])
 
         except ValueError as e:
-            print('invalid prefix? {}: {}'.format(pfx, repr(e)),
-                  file=sys.stderr)
+            fmt = 'invalid prefix? {}: {}'
+            print(fmt.format(pfx, repr(e)), file=sys.stderr)
             sys.exit(1)
+        return self
 
-    def set_nomatch(self, nomatch):
-        'Sets the value for a no-match, returns the old value'
-        self._nomatch, oldval = nomatch, self._nomatch
-        return oldval
 
-    def add(self, rid, srcs, dsts, ports, action='', dta={}):
-        'add a new rule or just add src and/or dst to an existing rule'
-        # for ival in summary(Ival(x).network() for x in srcs):
-        #     self._set_rid(rid, self._src, ival)
+    def _add(self, rid, srcs, dsts, srvs, name='', action='', obj=None):
+        'add Ivals to a new rule or just add to an existing rule'
         for ival in Ival.pfx_summary(srcs):
             self._set_rid(rid, self._src, ival)
-
-        # for ival in summary(Ival(x).network() for x in dsts):
-        #     self._set_rid(rid, self._dst, ival)
         for ival in Ival.pfx_summary(dsts):
             self._set_rid(rid, self._dst, ival)
+        for ival in Ival.portpfx_summary(srvs):
+            self._set_rid(rid, self._srv, ival)
 
-        # ports_as_pfxs = chain(*(Ival(x).as_networks() for x in ports))
-        # for ival in ports_as_pfxs:
-        #     self._set_rid(rid, self._dpp, ival)
-        # ports_as_pfxs = chain(*(Ival(x).as_networks() for x in ports))
-        for ival in Ival.portpfx_summary(ports):
-            self._set_rid(rid, self._dpp, ival)
+        # name,action are strings; action always lowercase
+        name = '' if name is None else str(name).strip()
+        action = '' if action is None else str(action).strip().lower()
 
-        fmt = 'warn: {}, {} swaps {!r} for new {!r}'
+        # set attributes if not already present
+        self._act.setdefault(rid, action)
+        self._obj.setdefault(rid, obj)
+        self._tag.setdefault(rid, name)
 
-        # always set an action for rid: default to False
-        new = action.lower() == 'permit' if action else self._act.get(rid, False)
-        old = self._act.setdefault(rid, new)
-        if old != new:
-            self._act[rid] = new
-            print(fmt.format(rid, 'action', old, new))
+        return self
 
-        # always set additional data dict (when it doesn't exist already)
-        old = self._dta.get(rid, None)  # get the old value
-        if old is None:
-            self._dta[rid] = dta            # set the new value
-            if old is not None and old != dta:  # if existing old != new, warn
-                print(fmt.format(rid, 'dta', old, dta))
+    # -- build methods
 
-        return True
+    def add(self, rid, srcs, dsts, srvs, action='', name='', obj=None):
+        'add src-list, dst-list and or list of srvs to a new/old rule'
+        # sanity check arguments
+        if not isinstance(rid, int):
+            raise TypeError('expected an int, not {!r}'.format(rid))
+        for x in [srcs, dsts, srvs]:
+            if not isinstance(x, (list, tuple)):
+                raise TypeError('expected a list, not {!r}'.format(x))
+        srcs = [Ival.ip_pfx(x) for x in srcs]
+        dsts = [Ival.ip_pfx(x) for x in dsts]
+        srvs = [Ival.port_str(x) for x in srvs]
 
-    def clear(self):
-        'clear all the rules'
-        self._src = pt.PyTricia()  # pfx -> set([rid's])
-        self._dst = pt.PyTricia()  # pfx -> set([rid's])
-        self._dpp = pt.PyTricai()  # pfx' -> set([rids])
-        self._act = {}             # rid -> action (True of False)
+        return self._add(rid, srcs, dsts, srvs, name, action, obj)
 
-    def get_rids(self, src, dst, port=None, proto=None):
-        'return the set of rule ids matched by session-tuple'
-        # src, dst are prefixes 'a.b.c.d[/e]'
-        # port = '<nr>/<protoname>' OR port='nr', proto='nr'
+
+    def ruleset(self, src=None, dst=None, srv=None):
+        'return the set of rule ids matched by src and/or dst and/or service'
+        # - finds matching rule sets by prefix lookups per item
+        #   returns the minimum rule nr of intersection
         try:
-            if port is None:
-                dpp = None
-            elif proto is None:
-                dpp = Ival.port_str(port).switch(Ival.IP)
-            else:
-                dpp = Ival.port_proto(int(port), int(proto)).switch(Ival.IP)
-            rids = self._dst[dst]
-            if dpp is not None:
-                rids = rids.intersection(self._dpp[str(dpp)])
-            return rids.intersection(self._src[src])
+            rv = []  # collect required matches
+
+            if src is not None:
+                rv.append(self._src[src])
+            if dst is not None:
+                rv.append(self._dst[dst])
+            if srv is not None:
+                # encode as pfx to index a PyTricia table
+                pfx = str(Ival.port_str(srv).switch(Ival.IP))
+                rv.append(self._srv[pfx])
+
+            if len(rv):
+                return set.intersection(*rv)
+            return set()
+
+
         except (KeyError, ValueError):
             return set()
-        except TypeError:  # invalid port, proto
+        except TypeError:  # invalid value supplied
             print('get rids error on port, proto', port, proto)
             return set()
 
-    def match(self, src, dst, port=None, proto=None):
-        'return True (permit), False (no permit) or the nomatch value'
-        src = src if src else 'any'
-        rids = self.get_rids(src, dst, port, proto)
+    # -- usage methods
+
+    def match(self, src, dst, srv):
+        'return a match object or the nomatch value'
+        rids = self.ruleset(src, dst, srv)
         if len(rids) == 0:
             return self._nomatch
-        # TODO: make it an error if a rule-id is missing from _act
-        return self._act.get(min(rids), self._nomatch)
+        rid = min(rids)
+        return Ip4Match(rid,
+                        self._act.get(rid, None),
+                        self._tag.get(rid, ''),
+                        self._obj.get(rid, None))
 
-    def get(self, src, dst, port=None, proto=None):
-        'return match object of the matching rule or the nomatch value'
-        rids = self.get_rids(src, dst, port, proto)
-        if len(rids) == 0:
-            return self._nomatch
+    # -- to/from CSV
 
-        # TODO: make it an error is a rule-id is missing from _act
-        return self._dta.get(min(rids), self._nomatch)
-
-    def rules(self):
+    @property
+    def as_dict(self):
         'reconstruct the rules in a dict of dicts'
-        # {rule_id: {src:[..], dst:[..], dport: [..], action: str, dta: {..}}}
+        # {rule nr: {src:[..], dst:[..], srv: [..], action: str, name: str, obj: {..}}}
 
         rules = {}
         for pfx in self._src.keys():
-            ruleset = self._src[pfx]
-            for rulenr in ruleset:
-                dct = rules.setdefault(rulenr, {})
-                dct.setdefault('src', []).append(pfx)
+            for rulenr in self._src[pfx]:
+                rules.setdefault(rulenr, {}).setdefault('src', []).append(pfx)
 
-        # by now, rules should have all available rule nrs
-        errfmt = 'Malformed Filter for rule {}'
-        for pfx in self._dst.keys():
-            ruleset = self._dst[pfx]
-            for rulenr in ruleset:
-                dct = rules.setdefault(rulenr, {})
-                if len(dct) == 0:
-                    raise Exception(errfmt.format(rulenr))
-                dct.setdefault('dst', []).append(pfx)
+        try:
+            for pfx in self._dst.keys():
+                for rulenr in self._dst[pfx]:
+                    rules[rulenr].setdefault('dst', []).append(pfx)
 
-        for port in self._dpp.keys():
-            ruleset = self._dpp[port]
-            for rulenr in ruleset:
-                dct = rules.setdefault(rulenr, {})
-                if len(dct) == 0:
-                    raise Exception(errfmt.format(rulenr))
-                dct.setdefault('dport', []).append(port)
+            for pfx in self._srv.keys():  # portstr encoded as a pfx
+                for rulenr in self._srv[pfx]:
+                    rules[rulenr].setdefault('srv', []).append(pfx)
 
-        for rulenr, action in self._act.items():
-            dct = rules.get(rulenr, None)
-            if dct is None:
-                raise Exception(errfmt.format(rulenr))
-            dct['action'] = action
+            for rulenr, action in self._act.items():
+                rules[rulenr]['action'] = action
 
-        for rulenr, data in self._dta.items():
-            dct = rules.get(rulenr, None)
-            if dct is None:
-                raise Exception(errfmt.format(rulenr))
-            dct['dta'] = data
+            for rulenr, obj in self._obj.items():
+                rules[rulenr]['obj'] = obj
 
-        # sanitize more specifics in a src/dst list of a rule
+            for rulenr, name in self._tag.items():
+                rules[rulenr]['name'] = name
+
+        except KeyError as e:
+            errfmt = 'Error in rule {}:{}'
+            raise Exception(errfmt.format(rulenr, repr(e)))
+
         for r, rule in rules.items():
+            # first summarize auto-added more specifics (for set calculations)
             rule['src'] = Ival.summary(map(Ival.ip_pfx, rule['src']))
             rule['dst'] = Ival.summary(map(Ival.ip_pfx, rule['dst']))
-            rule['dport'] = Ival.summary(map(Ival.port_pfx, rule['dport']))
+            rule['srv'] = Ival.summary(map(Ival.port_pfx, rule['srv']))
+            # next stringify the ivals
+            rule['src'] = list(map(str, rule['src']))
+            rule['dst'] = list(map(str, rule['dst']))
+            rule['srv'] = list(map(str, rule['srv']))
 
         return rules
 
-    def lines(self, csv=False):
-        'return filter as lines for printing'
-        # {rule_id: {src:[..], dst:[..], dport: [..], action: str, dta: {..}}}
-        #              }
-        rules = sorted(self.rules().items())  # rules dict -> ordered [(k,v)]
-        fields = 'rule src dst dport action dta'.split()
-        fmt = '{!s:<5} {!s:21} {!s:21} {!s:16} {!s:7} {!s}'
-        fmt = '{},{},{},{},{},{}' if csv else fmt
-        lines = [fmt.format(*fields)]   # csv-header of field names
-        for nr, rule in rules:
-            maxl = max(len(rule['src']), len(rule['dst']), len(rule['dport']))
-            lines.append('-'*85)
-            for lnr in range(0, maxl):
-                act = ''
-                src = rule['src'][lnr] if lnr < len(rule['src']) else ''
-                dst = rule['dst'][lnr] if lnr < len(rule['dst']) else ''
-                prt = rule['dport'][lnr] if lnr < len(rule['dport']) else ''
-                dta = ''
-                if lnr == 0:
-                    act = 'permit' if rule['action'] else 'deny'
-                    dta = rule['dta']
-
-                lines.append(fmt.format(nr, src, dst, prt, act, dta))
-                nr = ''  # only list rule nr on first line
-
-        return lines
-
-    def to_csv(self, fname):
+    def to_csv(self):
         'write ruleset to csv-file'
-        try:
-            outf = fname if fname is sys.stdout else open(fname, 'w')
-            for line in self.lines(csv=True):
-                print(line, file=outf)
-            if outf is not sys.stdout:
-                outf.close()
-        except (IOError, OSError) as e:
-            fmt = 'error saving {!}: {!r}'
-            raise OSError(fmt.format(fname, e))
-        return True
+        rv = []
+        for line in self._lines(csv=True):
+            rv.append(line)
+        return '\n'.join(rv)
 
-    def from_csv(self, fname):
-        'read ruleset from csv-file'
-        # TODO: check for empty df and presence of required fields
-        inpfile = fname if os.path.isfile(fname) else '{}.csv'.format(fname)
+    def from_csv(self, text):
+        'read ruleset from csv-text'
+        inp = io.StringIO(text + '\n')
         try:
-            df = pd.read_csv(inpfile, skipinitialspace=True)
-        except (IOError, OSError):
+            df = pd.read_csv(inp, skipinitialspace=True)
+        except pd.errors.EmptyDataError:
             df = pd.DataFrame()  # empty dataframe
 
         df.columns = [re.sub(r'(\s|\.)+', '_', n) for n in df.columns]
-        # df = ut.load_csv(inpfile)
         if len(df.index) == 0:
             raise IOError('Ip4Filter cannot read {!r}'.format(fname))
 
-        # check columns and get superfluous cols into list for later dta dict
-        required_columns = 'rule src dst dport action'.split()
+        required_columns = 'rule name src dst srv action obj'.split()
         missing = [x for x in required_columns if x not in df.columns.values]
-        dta_cols = [x for x in df.columns.values if x not in required_columns]
-        dta_cols.extend(['rule', 'action'])  # add these -> match object
 
         if len(missing):
             raise ValueError('Ip4Filter is missing columns {}'.format(missing))
@@ -732,24 +724,14 @@ class Ip4Filter(object):
             df.fillna(value='', inplace=True)
             df['rule'] = df['rule'].astype(int)
             for idx, row in df.iterrows():
-                rid = int(row['rule'])  # TODO: we did atype(int) already?
-
-                # srcs = [x.strip() for x in row['src'].split()]
-                # dsts = [x.strip() for x in row['dst'].split()]
-                # ports = [x.strip() for x in row['dport'].split()]
-                # act = row['action']
-                # dta = row[dta_cols].to_dict()
-                # self.add(rid, srcs, dsts, ports, act, dta)
-
-                srcs = [Ival.ip_pfx(x.strip()) for x in row['src'].split()]
-                dsts = [Ival.ip_pfx(x.strip()) for x in row['dst'].split()]
-                ports = [Ival.port_str(x.strip()) for x in row['dport'].split()]
+                rid = row['rule']
+                srcs = [Ival.ip_pfx(x) for x in row['src'].split()]
+                dsts = [Ival.ip_pfx(x) for x in row['dst'].split()]
+                ports = [Ival.port_str(x) for x in row['srv'].split()]
                 act = row['action']
-                dta = row[dta_cols].to_dict()
-                self.add(rid, srcs, dsts, ports, act, dta)
+                name = row['name']
+                obj = json.loads(row['obj']) if len(row['obj']) else ''
+                self._add(rid, srcs, dsts, ports, name=name, action=act, obj=obj)
         except Exception as e:
-            print('oops', repr(e))
-            sys.exit(1)
-
-
-
+            sys.exit(repr(e))
+        return self

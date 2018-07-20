@@ -3,9 +3,7 @@ Ip Log Filter - parser
 '''
 
 import os
-
 import ply.yacc as yacc
-
 from . import lex
 
 tokens = lex.tokens
@@ -94,9 +92,9 @@ def p_item(p):
 
 
 def p_rule(p):
-    #  0           1     2   3     4   5     6     7     8   9      10
+    #  0         1     2   3     4   5     6  7     8     9      10   11
     'rule-stmt : TILDE tag group DIR group AT group COLON action json NEWLINE'
-    # rule = [type tag addrs dir addrs srvs action tag json]
+    # rule = [type tag addrs dir addrs srvs action json]
     p[0] = _stmt(p, ('RULE', p[2], p[3], p[4], p[5], p[7], p[9], p[10]))
 
 
@@ -164,7 +162,7 @@ def p_action(p):
 
 
 def p_json(p):
-    '''json : BRACKSTR
+    '''json : JSON
             | empty'''
     p[0] = p[1]
 

@@ -1,8 +1,6 @@
 import pytest
 import sys
 
-print('test_utils', sys.path)
-
 import jabs.utils as ut
 
 

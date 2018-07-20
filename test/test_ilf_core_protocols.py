@@ -1,5 +1,5 @@
 '''
-test Ip4Proto
+test Ip4Protocol
 '''
 
 import pytest
