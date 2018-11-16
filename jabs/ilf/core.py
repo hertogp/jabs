@@ -12,7 +12,7 @@ from itertools import chain
 
 import pytricia as pt
 
-from jabs.ilf.numbers import IP4PROTOCOLS, IP4SERVICES
+from .numbers import IP4PROTOCOLS, IP4SERVICES
 
 # -- Helpers
 

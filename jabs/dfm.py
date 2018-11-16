@@ -71,8 +71,8 @@ import pandas as pd
 import numpy as np
 import pytricia as pt
 
-from jabs.ilf import Ip4Filter, Ip4Protocol, Ip4Service, Ival
-import jabs.utils as ut
+from ilf import Ip4Filter, Ip4Protocol, Ip4Service, Ival
+import utils as ut
 
 #-- Logging
 

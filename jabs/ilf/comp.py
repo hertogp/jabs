@@ -5,8 +5,8 @@ ilf - compiler
 import os
 import json
 
-from jabs.ilf.parse import parse
-from jabs.ilf.core import Ip4Filter, Ival
+from .parse import parse
+from .core import Ip4Filter, Ival
 
 
 # -- GLOBALS
