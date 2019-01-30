@@ -1685,6 +1685,8 @@ class Commander(object):
             # self.fatal(errors, lhs, rhs)
 
         try:
+            # prevent groupby from dropping rows that have a NaN somewhere
+            self.dfm = self.dfm.fillna("NaN")
             self.dfm = self.dfm.groupby(rhs, as_index=False).agg({dst: 'sum'})
         except (KeyError, ValueError) as e:
             self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
