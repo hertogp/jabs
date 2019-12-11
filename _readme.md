@@ -1,5 +1,5 @@
 ---
-imagine.shebang.im_out: stderr
+imagine.shebang.im_out: stdout
 imagine.shebang.im_log: 4
 ...
 
@@ -26,7 +26,8 @@ pytest
 # Usage
 
 ## dfm
-```shebang
+
+```{.shebang im_out=stderr}
 #!/bin/bash
 
 dfm help:dfm
@@ -95,7 +96,7 @@ number of sessions gets large.
 dataframe.  Add, delete, keep columns or filter rows based on a regex.  Rows
 can be filtered using a regex on columns or an ip filter.
 
-```shebang
+```{.shebang im_out=stderr}
 #!/bin/bash
 
 dfm help:

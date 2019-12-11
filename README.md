@@ -113,18 +113,48 @@ Show traffic from some systems:
 
 where `example/logs.csv` contains:
 
-#!/bin/bash
-cat example/logs.csv
+    src,dst,srv,count
+    10.10.10.1,1.1.1.1,53/udp,100
+    10.10.10.1,2.2.2.2,80/tcp,100
+    10.10.10.10,1.1.1.1,53/udp,35
+    10.10.10.12,3.3.3.3,443/tcp,100
 
 which is enriched, using `example/subnets.csv` with vpn information:
 
-#!/bin/bash
-cat example/logs+vpns.csv
+    src,dst,srv,src_vpn,dst_vpn,count
+    10.10.10.1,1.1.1.1,53/udp,my_org,inet-CloudFlare,100
+    10.10.10.1,2.2.2.2,80/tcp,my_org,Internet,100
+    10.10.10.10,1.1.1.1,53/udp,my_org,inet-CloudFlare,35
+    10.10.10.12,3.3.3.3,443/tcp,my_org,Internet,100
 
 which in turn, is converted into a graphviz file containing:
 
-#!/bin/bash
-cat example/logs.dot
+    digraph dfm {
+        overlap=scale;
+        ranksep="1.5 equally";
+        rankdir=LR;
+        labelloc="t";
+        label="VPN-traffic";
+         subgraph "cluster_my_org" {
+         label="my_org";
+    "10.10.10.1";
+    "10.10.10.10";
+    "10.10.10.12";
+    }
+         subgraph "cluster_Internet" {
+         label="Internet";
+    "2.2.2.2";
+    "3.3.3.3";
+    }
+         subgraph "cluster_inet-CloudFlare" {
+         label="inet-CloudFlare";
+    "1.1.1.1";
+    }
+    "10.10.10.1" -> "1.1.1.1"[label="53/udp"];
+    "10.10.10.1" -> "2.2.2.2"[label="80/tcp"];
+    "10.10.10.10" -> "1.1.1.1"[label="53/udp"];
+    "10.10.10.12" -> "3.3.3.3"[label="443/tcp"];
+    }
 
 which is converted to an image by the `dot` command. Although cute and
 perhaps sometimes useful, it gets pretty messy, pretty fast if the
