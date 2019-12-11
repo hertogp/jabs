@@ -34,6 +34,8 @@ dfm help:dfm
 
 ## dfm example
 
+Show traffic from some systems:
+
 ```{.shebang im_out=img,fcb}
 #!/bin/bash
 
@@ -58,6 +60,32 @@ dfm r:$LOGS \
 
 dot -Tpng $DOTF -o $IMGF
 ```
+
+where `example/logs.csv` contains:
+
+```shebang
+#!/bin/bash
+cat example/logs.csv
+```
+
+which is enriched, using `example/subnets.csv`  with vpn information:
+
+```shebang
+#!/bin/bash
+cat example/logs+vpns.csv
+```
+
+which in turn, is converted into a graphviz file containing:
+
+```shebang
+#!/bin/bash
+cat example/logs.dot
+```
+
+which is converted to an image by the `dot` command.  Although cute and perhaps
+sometimes useful, it gets pretty messy, pretty fast if the number of hosts or
+number of sessions gets large.
+
 
 # Documentation
 

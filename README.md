@@ -84,6 +84,8 @@ description:
 
 ## dfm example
 
+Show traffic from some systems:
+
 ![](pd-images/77bb0bab7a6a814259aea68e6995637ffdfaef7d.png)
 
     #!/bin/bash
@@ -108,6 +110,25 @@ description:
         -v -d
     
     dot -Tpng $DOTF -o $IMGF
+
+where `example/logs.csv` contains:
+
+#!/bin/bash
+cat example/logs.csv
+
+which is enriched, using `example/subnets.csv` with vpn information:
+
+#!/bin/bash
+cat example/logs+vpns.csv
+
+which in turn, is converted into a graphviz file containing:
+
+#!/bin/bash
+cat example/logs.dot
+
+which is converted to an image by the `dot` command. Although cute and
+perhaps sometimes useful, it gets pretty messy, pretty fast if the
+number of hosts or number of sessions gets large.
 
 # Documentation
 
