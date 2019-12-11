@@ -614,10 +614,10 @@ class Commander(object):
                                           hlp['syntax'])
                 log.info(msg)
                 log.info('')
-                log.info('information: {}'.format(hlp['info']))
-                log.info('\ndescription:')
+                log.info('information:\n    {}'.format(hlp['info']))
+                log.info('\ndescription:\n')
                 for line in hlp['descr'].splitlines():
-                    log.info('  {}'.format(line))
+                    log.info('    {}'.format(line))
             else:
                 log.info('{!r} not a command, available are:'.format(cmd))
                 for idx, hlp in self.hlp.items():
