@@ -3,9 +3,8 @@
 Small collection of utilities for enriching/filtering log-files
 
 ToDo:
-  o setup venv using python3
-  o re-install all requirements
-  o refresh requirements via pip3 freeze > requirements.txt
+  x re-install all requirements
+  x refresh requirements via pip3 freeze > requirements.txt
   o add more howto test using pytest
   o add more tests
   o add howto use ilf's filtering
@@ -23,8 +22,6 @@ Makes namedrop obsolete.  dfm allows commandline manipulation of a log file
 read into a pandas dataframe.  Add, delete, keep columns or filter rows based
 on a regex.  Rows can be filtered using a regex on columns or an ip filter.
 
-o 2do traffic patterns can be tagged using cmd: f=tag:rulebase,src,dst[,port]
-
 ## ilf - ip log filter
 
 Helper module used by dfm for ip filtering using a firewall-like rulebase with
@@ -33,9 +30,14 @@ src,dst,port,action,tag.
 
 ## PYTEST
 
-Simply run pytest from the project's root dir, e.g. ~/dev/jabs
+Run
 
 ```
+# If pytest not installed yet:
 $ sudo pip3 install -U pytest
+
+# Then move to test-subdir of jabs project and run pytest:
+cd ~/dev/jabs/test
+pytest
 ```
 
