@@ -610,10 +610,10 @@ class Commander(object):
             hlp = self.hlp.get(cmd, None) or self.hlp.get('cmd_{}'.format(cmd),
                                                           None)
             if hlp:
-                msg = '{:.9} - {}'.format(cmd.replace('cmd_', ''),
+                msg = '### {:.9} - {}'.format(cmd.replace('cmd_', ''),
                                           hlp['syntax'])
                 log.info(msg)
-                log.info('-'*len(msg))
+                log.info('')
                 log.info('information: {}'.format(hlp['info']))
                 log.info('\ndescription:')
                 for line in hlp['descr'].splitlines():
