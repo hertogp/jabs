@@ -1,3 +1,4 @@
 subnet,name,vpn
-1.0.0.0/8,Internet,n/a
+1.1.1.0/24,APNIC-LABS,inet-CloudFlare
 10.0.0.0/8,rfc1918,my_org
+0.0.0.0/0,Internet,Internet

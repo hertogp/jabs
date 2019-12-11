@@ -1056,7 +1056,7 @@ class Commander(object):
         def safe_port(row):
             try:
                 port, proto = row[fport], row[fproto]
-                return Ival.from_portproto(port, proto).to_portstr()
+                return Ival.port_proto(port, proto).port()
             except ValueError:
                 return np.nan
 
@@ -1678,11 +1678,6 @@ class Commander(object):
             log.debug('casting %s (type %s) to %r',
                       dst, self.dfm[dst].dtype, 'int64')
             self.dfm[dst] = self.dfm[dst].astype('int64')
-            # errors.append('{!r} is not numeric'.format(dst))
-            # errors.append('available columns and types are:')
-            # for name, typ in self.dfm.dtypes.items():
-            #     errors.append('{}:{}'.format(name, typ))
-            # self.fatal(errors, lhs, rhs)
 
         try:
             # prevent groupby from dropping rows that have a NaN somewhere
@@ -1690,6 +1685,11 @@ class Commander(object):
             self.dfm = self.dfm.groupby(rhs, as_index=False).agg({dst: 'sum'})
         except (KeyError, ValueError) as e:
             self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
+        except TypeError as e:
+            for name, typ in self.dfm.dtypes.items():
+                errors.append('{}:{}'.format(name, typ))
+            errors.append('runtime error: {!r}'.format(e))
+            self.fatal(errors, lhs, rhs)
 
         return self
 
@@ -1781,21 +1781,17 @@ class Commander(object):
 
     def cmd_ipf(self, lhs, rhs):
         '''
-        syntax: [fx]=ipf:filter[.csv],src,dst[,port[,proto]]
-        info: either filter rows or put the tag of matching rules in fx
+        syntax: [fx,..]=ipf:filter[.csv],src,dst[,srv]
+        info: filter rows and add columns based on a matching rule
         descr:
            'ipf:' loads the rule-set given by filter.csv and uses the listed
            src,dst,port-fields to try and match them against the filter.  The
-           filter cached in case the same filter is used again for tagging
+           filter is cached in case the same filter is used again for tagging
            instead of filtering (or vice versa).
 
            If no lhs-field fx is given, rows with a negative match will be
            filtered out.  Otherwise, the tag from the first rule to match will
            be assigned to fx.
-
-           If you only use the port-field, it should be port/proto values, like
-           80/tcp.  If both port, proto are given the should list the port,
-           protocol numbers like 80, 17.
 
            The rhs-fields, except the first one which should refer to an
            existing filter file on disk, should be existing columns in the
@@ -1839,7 +1835,7 @@ class Commander(object):
         ipf = self.ipf.get(ipfilter, None)
         if ipf is None:
             log.info('reading {} from disk'.format(ipfilter))
-            ipf = Ip4Filter(ipfilter)
+            ipf = Ip4Filter.compile(ipfilter)
             self.ipf[ipfilter] = ipf
         else:
             log.info('filter retrieved from cache')
@@ -1850,21 +1846,26 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
 
         if args.log_level == logging.DEBUG:
-            for line in ipf.lines():
+            for line in ipf._lines():
                 log.debug(line)
 
-        nomatch = '' if dest_field else False   # tag empty string for a miss
-        old_nomatch = ipf.set_nomatch(nomatch)  # nomatch => filter session out
-        ipfunc = ipf.get if dest_field else ipf.match
+        ipfunc = ipf.match
 
         def match(row):
+            mObj = None
             try:
                 if port is None:  # not using any port information
-                    return ipfunc(row[src], row[dst])
+                    mObj = ipfunc(row[src], row[dst])
                 elif proto is None:  # port is portstring, eg 80/tcp
-                    return ipfunc(row[src], row[dst], row[port])
+                    mObj = ipfunc(row[src], row[dst], row[port])
                 else:  # port, proto are nrs, eg 80, 17
-                    return ipfunc(row[src], row[dst], row[port], row[proto])
+                    mObj = ipfunc(row[src], row[dst], row[port], row[proto])
+
+                if mObj:
+                    return mObj.object.get(dest_field)
+                else:
+                    return mObj
+
             except Exception as e:
                 self.fatal(['runtime error1: {!r}'.format(e)], lhs, rhs)
 
@@ -1877,13 +1878,17 @@ class Commander(object):
         # except (KeyError, ValueError) as e:
         #     self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
 
-        ipf.set_nomatch(old_nomatch)  # restore old nomatch value
+        # XXX
+        # ipf.set_nomatch(old_nomatch)  # restore old nomatch value
+
+        # ipf._nomatch = old_nomatch
+        # XXX
         return self
 
     def cmd_ipfget(self, lhs, rhs):
         '''
-        syntax: fx,..=ipfget:filter[.csv],src,dst,service,g1,..
-        info: get filter match object w/ data-fields gx,.. and assign to fx,..
+        syntax: fx[,..]=ipfget:filter[.csv],src,dst,srv,gx[,..]
+        info: get filter match object's data-fields gx,.. and assign to fx,..
 
         descr:
            'ipfget:' loads the rule-set given by filter.csv and uses the listed
@@ -1900,18 +1905,12 @@ class Commander(object):
            filter are known (see below).
 
            An ipf filter is a csv file with mandatory fields:
-           rule,src,dst,dport,action followed by optional data fields.
+           rule,src,dst,srv followed by optional data fields.
 
-           The optional data fields can be retrieved using ipfget:
+           The match object's data fields can be retrieved using ipfget:
 
-             |-- required filter fields ---------|-- data fields --
-             rule,src_ip,dest_ip,dest_port,action,tag,attr
-             1,10/8,10.10.10.10,80/tcp,permit,intranet1,color=green
-             2,10/8,10.10.10.11,5000-6000/tcp,deny,drop-rule1,color=red
-             ,10/8,10.10.10.12,,,,
-             3,any,any,any,deny,generic-drop,color=blue
 
-          my_tag,my_attr=ipfget:file.csv,src,dst,service,tag,attr
+             my_tag,my_attr=ipfget:file.csv,src,dst,service,tag,attr
         '''
         # sanity check lhs, rhs
         errors = []
@@ -1932,11 +1931,11 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
 
         # decompose rhs
-        ipfilter, src, dst, dport, dta_fields = rhs[0], rhs[1], rhs[2], rhs[3], rhs[4:]
+        ipfilter, src, dst, srv, dta_fields = rhs[0], rhs[1], rhs[2], rhs[3], rhs[4:]
         ipf = self.ipf.get(ipfilter, None)
         if ipf is None:
             log.info('reading {} from disk'.format(ipfilter))
-            ipf = Ip4Filter(ipfilter)
+            ipf = Ip4Filter.compile(ipfilter)
             self.ipf[ipfilter] = ipf
         else:
             log.info('filter retrieved from cache')
@@ -1946,15 +1945,15 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
 
         if args.log_level == logging.DEBUG:
-            for line in ipf.lines():
+            for line in ipf._lines():
                 log.debug(line)
 
         def match(row):
             try:
-                dct = ipf.get(row[src], row[dst], row[dport])
-                if dct is None:
+                mObj = ipf.match(row[src], row[dst], row[dport])
+                if mObj is None:
                     return pd.Series(['err'] * len(dta_fields))
-                return pd.Series([dct.get(k, 'err') for k in dta_fields])
+                return pd.Series([mObj.object.get(k, 'err') for k in dta_fields])
 
             except Exception as e:
                 errors.append('matched data has keys {}'.keys())
@@ -1966,10 +1965,9 @@ class Commander(object):
         # self.dfm[lhs] = self.dfm.apply(match, axis=1)
 
         def lookup(row):
-            dct = ipf.get(row[src], row[dst], row[dport])
-            if dct is None:
-                return ''
-            return dct.get(dta_field, 'err')
+            mObj = ipf.match(row[src], row[dst], row[srv])
+            if mObj is None: return ""
+            return mObj.object.get(dta_field, 'err')
 
         for dst_field, dta_field in zip(lhs, dta_fields):
             self.dfm[dst_field] = self.dfm.apply(lookup, axis=1)

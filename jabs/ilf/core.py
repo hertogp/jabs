@@ -592,6 +592,10 @@ class Ip4Filter(object):
         return self
 
     # -- build methods
+    @classmethod
+    def compile(cls, fname):
+        from . import comp
+        return comp.compile(fname)
 
     def add(self, rid, srcs, dsts, srvs, action='', name='', obj=None):
         'add src-list, dst-list and or list of srvs to a new/old rule'
@@ -606,7 +610,6 @@ class Ip4Filter(object):
         srvs = [Ival.port_str(x) for x in srvs]
 
         return self._add(rid, srcs, dsts, srvs, name, action, obj)
-
 
     def ruleset(self, src=None, dst=None, srv=None):
         'return the set of rule ids matched by src and/or dst and/or service'
@@ -628,11 +631,10 @@ class Ip4Filter(object):
                 return set.intersection(*rv)
             return set()
 
-
         except (KeyError, ValueError):
             return set()
         except TypeError:  # invalid value supplied
-            print('get rids error on port, proto', port, proto)
+            print('ruleset type error on', src, dst, srv)
             return set()
 
     # -- usage methods

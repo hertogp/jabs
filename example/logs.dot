@@ -1,0 +1,26 @@
+digraph dfm {
+    overlap=scale;
+    ranksep="1.5 equally";
+    rankdir=LR;
+    labelloc="t";
+    label="VPN-traffic";
+     subgraph "cluster_my_org" {
+     label="my_org";
+"10.10.10.1";
+"10.10.10.10";
+"10.10.10.12";
+}
+     subgraph "cluster_Internet" {
+     label="Internet";
+"2.2.2.2";
+"3.3.3.3";
+}
+     subgraph "cluster_inet-CloudFlare" {
+     label="inet-CloudFlare";
+"1.1.1.1";
+}
+"10.10.10.1" -> "1.1.1.1"[label="53/udp"];
+"10.10.10.1" -> "2.2.2.2"[label="80/tcp"];
+"10.10.10.10" -> "1.1.1.1"[label="53/udp"];
+"10.10.10.12" -> "3.3.3.3"[label="443/tcp"];
+}

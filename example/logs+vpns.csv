@@ -1,0 +1,5 @@
+src,dst,srv,src_vpn,dst_vpn,count
+10.10.10.1,1.1.1.1,53/udp,my_org,inet-CloudFlare,100
+10.10.10.1,2.2.2.2,80/tcp,my_org,Internet,100
+10.10.10.10,1.1.1.1,53/udp,my_org,inet-CloudFlare,35
+10.10.10.12,3.3.3.3,443/tcp,my_org,Internet,100

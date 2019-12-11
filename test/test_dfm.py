@@ -10,6 +10,9 @@ Run tests by doing:
 
 import logging
 import sys
+sys.path.insert(0, "..")
+sys.path.insert(0, "../jabs")
+print(sys.path)
 import jabs.dfm as dfm
 
 
