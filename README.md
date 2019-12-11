@@ -21,6 +21,8 @@ Run
 
 # Usage
 
+## dfm
+
 
 
 ### dfm - dfm command ...
@@ -79,6 +81,33 @@ description:
     privileges outside my reach or a lot of repetitive manual labor.
 
 
+
+## dfm example
+
+![](pd-images/77bb0bab7a6a814259aea68e6995637ffdfaef7d.png)
+
+    #!/bin/bash
+    
+    SUBNETS=example/subnets.csv
+    
+    LOGS=example/logs.csv
+    DOTF=${LOGS%.csv}.dot
+    VPNF=${LOGS%.csv}+vpns.csv
+    IMGF=$1
+    
+    # read $LOG -> write enriched logs to $VPNF and dotify to $DOTF
+    # then turn dot-file into image
+    
+    dfm r:$LOGS \
+        src_vpn=ipl:$SUBNETS,src,vpn \
+        dst_vpn=ipl:$SUBNETS,dst,vpn \
+        src,dst,srv,count,src_vpn,dst_vpn=keep: \
+        count=sum: \
+        w:$VPNF \
+        $DOTF,VPN-traffic=dotify:src_vpn^src,dst_vpn^dst,srv \
+        -v -d
+    
+    dot -Tpng $DOTF -o $IMGF
 
 # Documentation
 

@@ -25,10 +25,38 @@ pytest
 
 # Usage
 
+## dfm
 ```shebang
 #!/bin/bash
 
 dfm help:dfm
+```
+
+## dfm example
+
+```{.shebang im_out=img,fcb}
+#!/bin/bash
+
+SUBNETS=example/subnets.csv
+
+LOGS=example/logs.csv
+DOTF=${LOGS%.csv}.dot
+VPNF=${LOGS%.csv}+vpns.csv
+IMGF=$1
+
+# read $LOG -> write enriched logs to $VPNF and dotify to $DOTF
+# then turn dot-file into image
+
+dfm r:$LOGS \
+    src_vpn=ipl:$SUBNETS,src,vpn \
+    dst_vpn=ipl:$SUBNETS,dst,vpn \
+    src,dst,srv,count,src_vpn,dst_vpn=keep: \
+    count=sum: \
+    w:$VPNF \
+    $DOTF,VPN-traffic=dotify:src_vpn^src,dst_vpn^dst,srv \
+    -v -d
+
+dot -Tpng $DOTF -o $IMGF
 ```
 
 # Documentation
