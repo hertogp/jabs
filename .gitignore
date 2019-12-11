@@ -10,6 +10,7 @@ parsetab.py
 pd-images/*
 !pd-images/*.png
 !pd-images/*.svg
+*/pd-image/
 
 ## Unit test / coverage reports
 .coverage
@@ -21,7 +22,6 @@ nosetests.xml
 scr/
 tmp/
 venv/
-pd-images/
 .pytest_cache/
 
 # Packages
