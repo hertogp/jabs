@@ -1301,7 +1301,7 @@ class Commander(object):
         self.fatal(errors, lhs, rhs)
 
         expression = rhs.pop()
-        parts = re.split('(/)', expression)  # keep delim / in parts
+        parts = re.split('((?<!\\\)/)', expression)  # keep delim / in parts
         delim = parts[1::2]                  # either 2 or 3 /'s are valid!
         terms = list(parts[::2])
         rgx_inverse = False
@@ -1324,7 +1324,8 @@ class Commander(object):
             self.fatal(errors, lhs, rhs)
 
         try:
-            rgx = re.compile(terms[1], flags)
+            #pdh:new replace any escaped forward slash
+            rgx = re.compile(terms[1].replace('\/', '/'), flags)
         except Exception as e:
             errors.append('Failed to compile expression {!}'.format(expression))
             errors.append(' - error: {}'.format(repr(e)))
@@ -1374,7 +1375,8 @@ class Commander(object):
         elif len(delim) == 3:
             # [f1=]f2~/expr/repl/[flags]  to replace in f2 and/or assign to f1
             # when substituting, rgx_inverse flag cannot be used
-            repl = terms[2]
+            # pdh:new unescaped any escaped forward slash (was split delim)
+            repl = terms[2].replace('\/', '/')
             if len(rhs) == 0:
                 srcs = lhs
             elif len(rhs) == 1:
@@ -1784,14 +1786,14 @@ class Commander(object):
         syntax: [fx,..]=ipf:filter[.csv],src,dst[,srv]
         info: filter rows and add columns based on a matching rule
         descr:
-           'ipf:' loads the rule-set given by filter.csv and uses the listed
-           src,dst,port-fields to try and match them against the filter.  The
+           'ipf:' loads the rule-set given by filter.ilf and uses the listed
+           src,dst,srv-fields to try and match them against the filter.  The
            filter is cached in case the same filter is used again for tagging
            instead of filtering (or vice versa).
 
            If no lhs-field fx is given, rows with a negative match will be
-           filtered out.  Otherwise, the tag from the first rule to match will
-           be assigned to fx.
+           filtered out.  Otherwise, the `tag` from the first rule to match
+           will be assigned to fx.
 
            The rhs-fields, except the first one which should refer to an
            existing filter file on disk, should be existing columns in the
@@ -1800,15 +1802,15 @@ class Commander(object):
            The filter[.csv] file should list a rule-base with columns:
            rule, src_ip, dest_ip, dest_port, action, tag.  Something like:
 
-             rule,src_ip,dest_ip,dest_port,action,tag
-             1,10/8,10.10.10.10,80/tcp,permit,intranet1
-             2,10/8,10.10.10.11,5000-6000/tcp,deny,drop-rule1
-             ,10/8,10.10.10.12,,,
-             3,any,any,any,deny,generic-drop
+             dns 53/udp 53/tcp 4.4.4.4 4.4.8.8
+             dns-cf 1.1.1.1
+
+             ~(dns1) any > dns    @ dns : permit = {"tag": "google dns"}
+             ~(dns2) any > dns-cf @ dns : permit = {"tag": "cloudflare dns"}
+             ~(dns3) any > any    @ dns : permit = {"tag": "other dns"}
 
            Example:
-           tag=ipf:myfilter,my_src,my_dest,dport         # dport is eg 80/tcp
-           tag=ipf:myfilter,my_src,my_dest,dport,dproto  # dport,dproto = 80,17
+           tag=ipf:myfilter,src,dst,srv,tag
         '''
         # sanity check lhs, rhs
         errors = []

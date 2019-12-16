@@ -62,7 +62,8 @@ def t_PORTSTR(t):
     return t
 
 def t_IP(t):
-    r'(?i)(HOST_|NET_)?\d+(\.\d+(\.\d+(\.\d+)?)?)?(/\d+)?'
+    r'([Hh][Oo][Ss][Tt]_|[Nn][Ee][Tt]_)?\d+(\.\d+(\.\d+(\.\d+)?)?)?(/\d+)?'
+    # r'(?i)(HOST_|NET_)?\d+(\.\d+(\.\d+(\.\d+)?)?)?(/\d+)?'
     t.type = 'IP'
     t.value = re.sub(r'(?i)HOST_|NET_', '', t.value)
     t.value = (t.type, t.value)

@@ -11,6 +11,7 @@ pd-images/*
 !pd-images/*.png
 !pd-images/*.svg
 */pd-image/
+pdf/
 
 ## Unit test / coverage reports
 .coverage
