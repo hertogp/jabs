@@ -1783,25 +1783,25 @@ class Commander(object):
 
     def cmd_ipf(self, lhs, rhs):
         '''
-        syntax: [fx,..]=ipf:filter[.csv],src,dst[,srv]
-        info: filter rows and add columns based on a matching rule
+        syntax: [fx=]ipf:filter[.ipf],src,dst[,srv]
+        info: filter rows using filter.ipf's definitions
         descr:
-           'ipf:' loads the rule-set given by filter.ilf and uses the listed
-           src,dst,srv-fields to try and match them against the filter.  The
-           filter is cached in case the same filter is used again for tagging
-           instead of filtering (or vice versa).
+           'ipf:' loads the rule-set given by filter.ipf and uses the listed
+           src,dst and optional srv fields to try and match them against the
+           filter.  The filter is cached in case the same filter is used again
+           for tagging instead of filtering (or vice versa).
 
            If no lhs-field fx is given, rows with a negative match will be
-           filtered out.  Otherwise, the `tag` from the first rule to match
-           will be assigned to fx.
+           filtered out.  Otherwise, the fx column is fill with True/False
+           based on whether the row matched a filter rule.
 
            The rhs-fields, except the first one which should refer to an
            existing filter file on disk, should be existing columns in the
            dataframe.
 
-           The filter[.csv] file should list a rule-base with columns:
-           rule, src_ip, dest_ip, dest_port, action, tag.  Something like:
+           The filter[.ipf] file should look something like:
 
+             # create a service-group as well as a network-group name in one go
              dns 53/udp 53/tcp 4.4.4.4 4.4.8.8
              dns-cf 1.1.1.1
 
@@ -1810,7 +1810,7 @@ class Commander(object):
              ~(dns3) any > any    @ dns : permit = {"tag": "other dns"}
 
            Example:
-           tag=ipf:myfilter,src,dst,srv,tag
+           tag=ipf:myfilter,src,dst
         '''
         # sanity check lhs, rhs
         errors = []
@@ -1823,7 +1823,7 @@ class Commander(object):
             errors.append('- port,proto when they are protocol nrs, eg 80, 17')
             errors.append('got {!r} instead'.format(rhs))
         if not (os.path.isfile(rhs[0]) or
-                os.path.isfile('{}.csv'.format(rhs[0]))):
+                os.path.isfile('{}.ipf'.format(rhs[0]))):
             errors.append('cannot find ipf filter {!r} on disk'.format(rhs[0]))
         self.check_fields(errors, rhs[1:])  # all other rhs fields must exist
         self.fatal(errors, lhs, rhs)
@@ -1862,57 +1862,44 @@ class Commander(object):
                     mObj = ipfunc(row[src], row[dst], row[port])
                 else:  # port, proto are nrs, eg 80, 17
                     mObj = ipfunc(row[src], row[dst], row[port], row[proto])
-
-                if mObj:
-                    return mObj.object.get(dest_field)
-                else:
-                    return mObj
-
             except Exception as e:
                 self.fatal(['runtime error1: {!r}'.format(e)], lhs, rhs)
 
-        # try:
+            if mObj and mObj.action == 'permit':
+                return True
+            else:
+                return False
+
         if dest_field:
             self.dfm[dest_field] = self.dfm.apply(match, axis=1)
         else:
             self.dfm = self.dfm[self.dfm.apply(match, axis=1)]
 
-        # except (KeyError, ValueError) as e:
-        #     self.fatal(['runtime error: {!r}'.format(e)], lhs, rhs)
-
-        # XXX
-        # ipf.set_nomatch(old_nomatch)  # restore old nomatch value
-
-        # ipf._nomatch = old_nomatch
-        # XXX
         return self
 
     def cmd_ipfget(self, lhs, rhs):
         '''
-        syntax: fx[,..]=ipfget:filter[.csv],src,dst,srv,gx[,..]
+        syntax: fx[,..]=ipfget:filter[.ipf],src,dst,srv,gx[,..]
         info: get filter match object's data-fields gx,.. and assign to fx,..
 
         descr:
-           'ipfget:' loads the rule-set given by filter.csv and uses the listed
+           'ipfget:' loads the rule-set given by filter.ipf and uses the listed
            src,dst,service fields to try and match them against the filter.  The
            filter is cached in case the same filter is used again later on.
 
-           Any existing lhs-fields will be overwritten and created otherwise.
+           Any existing lhs-fields will be overwritten or created otherwise.
 
            The rhs-fields must specify the columns to use for src ip,
            destination ip and service, followed by the fields to retrieve from
-           the match object as specified by the ipf-filter.  All rhs-fields must
+           the match object as specified by the ip-filter.  All rhs-fields must
            exist, either in the dataframe (the first 3) or in het match object
-           returned by the filter.  So its handy if the extra datafields of the
-           filter are known (see below).
+           returned by the filter.
 
-           An ipf filter is a csv file with mandatory fields:
-           rule,src,dst,srv followed by optional data fields.
+           See ipf command for an ip filter example.  Assuming the filter lists
+           a json object for each rule that contains fields `tag` and `attr`,
+           you could pull them into columns of their own like so:
 
-           The match object's data fields can be retrieved using ipfget:
-
-
-             my_tag,my_attr=ipfget:file.csv,src,dst,service,tag,attr
+             tag,attr=ipfget:my-filter.ipf,src,dst,service,tag,attr
         '''
         # sanity check lhs, rhs
         errors = []
@@ -1927,7 +1914,7 @@ class Commander(object):
             errors.append('- followed by dta-fields (to assign to lhs-fields')
             errors.append('got {!r} instead'.format(rhs))
         if not (os.path.isfile(rhs[0]) or
-                os.path.isfile('{}.csv'.format(rhs[0]))):
+                os.path.isfile('{}.ipf'.format(rhs[0]))):
             errors.append('cannot find ipf filter {!r} on disk'.format(rhs[0]))
         self.check_fields(errors, rhs[1:4])  # fields for src,dst,dport must exist
         self.fatal(errors, lhs, rhs)

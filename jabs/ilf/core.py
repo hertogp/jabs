@@ -639,7 +639,7 @@ class Ip4Filter(object):
 
     # -- usage methods
 
-    def match(self, src, dst, srv):
+    def match(self, src, dst, srv=None):
         'return a match object or the nomatch value'
         rids = self.ruleset(src, dst, srv)
         if len(rids) == 0:

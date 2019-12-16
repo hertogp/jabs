@@ -309,67 +309,63 @@ description:
     the range.  Note that the lhs-fields must be numeric and must exist.
 
 
-### ipf - [fx,..]=ipf:filter[.csv],src,dst[,srv]
+### ipf - [fx=]ipf:filter[.ipf],src,dst[,srv]
 
 information:
-    filter rows and add columns based on a matching rule
+    filter rows using filter.ipf's definitions
 
 description:
 
-    'ipf:' loads the rule-set given by filter.csv and uses the listed
-    src,dst,port-fields to try and match them against the filter.  The
-    filter is cached in case the same filter is used again for tagging
-    instead of filtering (or vice versa).
+    'ipf:' loads the rule-set given by filter.ipf and uses the listed
+    src,dst and optional srv fields to try and match them against the
+    filter.  The filter is cached in case the same filter is used again
+    for tagging instead of filtering (or vice versa).
     
     If no lhs-field fx is given, rows with a negative match will be
-    filtered out.  Otherwise, the tag from the first rule to match will
-    be assigned to fx.
+    filtered out.  Otherwise, the fx column is fill with True/False
+    based on whether the row matched a filter rule.
     
     The rhs-fields, except the first one which should refer to an
     existing filter file on disk, should be existing columns in the
     dataframe.
     
-    The filter[.csv] file should list a rule-base with columns:
-    rule, src_ip, dest_ip, dest_port, action, tag.  Something like:
+    The filter[.ipf] file should look something like:
     
-    rule,src_ip,dest_ip,dest_port,action,tag
-    1,10/8,10.10.10.10,80/tcp,permit,intranet1
-    2,10/8,10.10.10.11,5000-6000/tcp,deny,drop-rule1
-    ,10/8,10.10.10.12,,,
-    3,any,any,any,deny,generic-drop
+    dns 53/udp 53/tcp 4.4.4.4 4.4.8.8
+    dns-cf 1.1.1.1
+    
+    ~(dns1) any > dns    @ dns : permit = {"tag": "google dns"}
+    ~(dns2) any > dns-cf @ dns : permit = {"tag": "cloudflare dns"}
+    ~(dns3) any > any    @ dns : permit = {"tag": "other dns"}
     
     Example:
-    tag=ipf:myfilter,my_src,my_dest,dport         # dport is eg 80/tcp
-    tag=ipf:myfilter,my_src,my_dest,dport,dproto  # dport,dproto = 80,17
+    tag=ipf:myfilter,src,dst
 
 
-### ipfget - fx[,..]=ipfget:filter[.csv],src,dst,srv,gx[,..]
+### ipfget - fx[,..]=ipfget:filter[.ipf],src,dst,srv,gx[,..]
 
 information:
     get filter match object's data-fields gx,.. and assign to fx,..
 
 description:
 
-    'ipfget:' loads the rule-set given by filter.csv and uses the listed
+    'ipfget:' loads the rule-set given by filter.ipf and uses the listed
     src,dst,service fields to try and match them against the filter.  The
     filter is cached in case the same filter is used again later on.
     
-    Any existing lhs-fields will be overwritten and created otherwise.
+    Any existing lhs-fields will be overwritten or created otherwise.
     
     The rhs-fields must specify the columns to use for src ip,
     destination ip and service, followed by the fields to retrieve from
-    the match object as specified by the ipf-filter.  All rhs-fields must
+    the match object as specified by the ip-filter.  All rhs-fields must
     exist, either in the dataframe (the first 3) or in het match object
-    returned by the filter.  So its handy if the extra datafields of the
-    filter are known (see below).
+    returned by the filter.
     
-    An ipf filter is a csv file with mandatory fields:
-    rule,src,dst,srv followed by optional data fields.
+    See ipf command for an ip filter example.  Assuming the filter lists
+    a json object for each rule that contains fields `tag` and `attr`,
+    you could pull them into columns of their own like so:
     
-    The match object's data fields can be retrieved using ipfget:
-    
-    
-    my_tag,my_attr=ipfget:file.csv,src,dst,service,tag,attr
+    tag,attr=ipfget:my-filter.ipf,src,dst,service,tag,attr
 
 
 ### ipl - fx,..=ipl:table,fy,g1,..
